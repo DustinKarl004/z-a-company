@@ -1,16 +1,81 @@
 <script setup>
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { listBranches } from "../api/branches";
-import { createStaff, listStaff, updateStaff } from "../api/staff";
+import { createStaff, deleteStaff, listStaff, updateStaff } from "../api/staff";
 import { ApiError } from "../api/client";
+import CustomSelect from "../components/CustomSelect.vue";
+import ConfirmDeleteModal from "../components/ConfirmDeleteModal.vue";
+import ConfirmModal from "../components/ConfirmModal.vue";
+import Modal from "../components/Modal.vue";
 
 const staff = ref([]);
 const branches = ref([]);
 const loading = ref(true);
 const submitting = ref(false);
 const error = ref("");
+const showAddModal = ref(false);
+
+const togglingId = ref(null);
+const deletingId = ref(null);
+const rowError = ref("");
+const deleteTarget = ref(null);
+const deleteModalError = ref("");
+const deleting = ref(false);
+
+const toggleTarget = ref(null);
+const toggleModalError = ref("");
+const toggling = ref(false);
 
 const form = ref({ name: "", email: "", password: "", branchId: "" });
+
+const search = ref("");
+const branchFilter = ref("");
+const statusFilter = ref("");
+
+const statusOptions = [
+  { label: "All statuses", value: "" },
+  { label: "Active", value: "active" },
+  { label: "Inactive", value: "inactive" },
+];
+
+const pageSize = 10;
+const currentPage = ref(1);
+
+const activeCount = computed(() => staff.value.filter((s) => s.is_active).length);
+const inactiveCount = computed(() => staff.value.length - activeCount.value);
+
+const filteredStaff = computed(() => {
+  const term = search.value.trim().toLowerCase();
+  return staff.value.filter((s) => {
+    if (term && !s.name.toLowerCase().includes(term) && !s.email.toLowerCase().includes(term)) return false;
+    if (branchFilter.value && s.branch_id !== branchFilter.value) return false;
+    if (statusFilter.value === "active" && !s.is_active) return false;
+    if (statusFilter.value === "inactive" && s.is_active) return false;
+    return true;
+  });
+});
+
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredStaff.value.length / pageSize)));
+
+const pagedStaff = computed(() => {
+  const start = (currentPage.value - 1) * pageSize;
+  return filteredStaff.value.slice(start, start + pageSize);
+});
+
+watch(totalPages, (total) => {
+  if (currentPage.value > total) currentPage.value = total;
+});
+
+watch([search, branchFilter, statusFilter], () => {
+  currentPage.value = 1;
+});
+
+function goToPage(page) {
+  currentPage.value = Math.min(Math.max(page, 1), totalPages.value);
+}
+
+const branchOptions = computed(() => branches.value.map((b) => ({ label: b.name, value: b.id })));
+const branchFilterOptions = computed(() => [{ label: "All branches", value: "" }, ...branchOptions.value]);
 
 function branchName(id) {
   return branches.value.find((b) => b.id === id)?.name || "—";
@@ -31,12 +96,23 @@ async function refresh() {
   loading.value = false;
 }
 
+function openAddModal() {
+  form.value = { name: "", email: "", password: "", branchId: "" };
+  error.value = "";
+  showAddModal.value = true;
+}
+
+function closeAddModal() {
+  showAddModal.value = false;
+}
+
 async function onSubmit() {
   error.value = "";
   submitting.value = true;
   try {
     await createStaff(form.value);
     form.value = { name: "", email: "", password: "", branchId: "" };
+    showAddModal.value = false;
     await refresh();
   } catch (e) {
     error.value = e instanceof ApiError ? e.detail || "Could not create staff" : "Could not create staff";
@@ -45,9 +121,58 @@ async function onSubmit() {
   }
 }
 
-async function toggleActive(member) {
-  await updateStaff(member.id, { is_active: !member.is_active });
-  await refresh();
+function onToggleActive(member) {
+  rowError.value = "";
+  toggleModalError.value = "";
+  toggleTarget.value = member;
+}
+
+function cancelToggle() {
+  toggleTarget.value = null;
+}
+
+async function confirmToggle() {
+  const member = toggleTarget.value;
+  toggleModalError.value = "";
+  toggling.value = true;
+  togglingId.value = member.id;
+  try {
+    await updateStaff(member.id, { is_active: !member.is_active });
+    toggleTarget.value = null;
+    await refresh();
+  } catch (e) {
+    toggleModalError.value = e instanceof ApiError ? e.detail || "Could not update staff" : "Could not update staff";
+  } finally {
+    toggling.value = false;
+    togglingId.value = null;
+  }
+}
+
+function onDelete(member) {
+  rowError.value = "";
+  deleteModalError.value = "";
+  deleteTarget.value = member;
+}
+
+function cancelDelete() {
+  deleteTarget.value = null;
+}
+
+async function confirmDelete(password) {
+  const member = deleteTarget.value;
+  deleteModalError.value = "";
+  deleting.value = true;
+  deletingId.value = member.id;
+  try {
+    await deleteStaff(member.id, password);
+    deleteTarget.value = null;
+    await refresh();
+  } catch (e) {
+    deleteModalError.value = e instanceof ApiError ? e.detail || "Could not delete staff" : "Could not delete staff";
+  } finally {
+    deleting.value = false;
+    deletingId.value = null;
+  }
 }
 
 onMounted(refresh);
@@ -60,77 +185,169 @@ onMounted(refresh);
         <h1>Staff</h1>
         <p class="page-subtitle">Staff accounts, scoped to a single branch each.</p>
       </div>
-      <span class="count-chip">{{ staff.length }} {{ staff.length === 1 ? "member" : "members" }}</span>
-    </div>
-
-    <form class="card new-staff" @submit.prevent="onSubmit">
-      <h2 class="card-title">Add a staff member</h2>
-      <div class="new-staff-grid">
-        <div class="field">
-          <label for="staff-name">Name</label>
-          <input id="staff-name" v-model="form.name" required placeholder="Jane Dela Cruz" />
-        </div>
-        <div class="field">
-          <label for="staff-email">Email</label>
-          <input id="staff-email" v-model="form.email" type="email" required placeholder="jane@za-company.com" />
-        </div>
-        <div class="field">
-          <label for="staff-password">Password</label>
-          <input id="staff-password" v-model="form.password" type="password" required minlength="8" placeholder="At least 8 characters" />
-        </div>
-        <div class="field">
-          <label for="staff-branch">Branch</label>
-          <select id="staff-branch" v-model="form.branchId" required>
-            <option disabled value="">Select a branch</option>
-            <option v-for="b in branches" :key="b.id" :value="b.id">{{ b.name }}</option>
-          </select>
-        </div>
-      </div>
-      <button type="submit" :disabled="submitting">{{ submitting ? "Adding..." : "Add staff" }}</button>
-      <p v-if="error" class="error-message">{{ error }}</p>
-    </form>
-
-    <div class="card table-card">
-      <table v-if="!loading && staff.length">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Branch</th>
-            <th>Status</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="s in staff" :key="s.id">
-            <td>
-              <div class="person-cell">
-                <span class="avatar">{{ initials(s.name) }}</span>
-                <div>
-                  <div class="primary-cell">{{ s.name }}</div>
-                  <div class="secondary-cell">{{ s.email }}</div>
-                </div>
-              </div>
-            </td>
-            <td>{{ branchName(s.branch_id) }}</td>
-            <td>
-              <span class="badge" :class="s.is_active ? 'active' : 'inactive'">
-                {{ s.is_active ? "Active" : "Inactive" }}
-              </span>
-            </td>
-            <td class="actions-cell">
-              <button class="secondary" @click="toggleActive(s)">
-                {{ s.is_active ? "Deactivate" : "Activate" }}
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-else-if="loading" class="state-message">Loading staff...</p>
-      <div v-else class="empty-state">
-        <p>No staff yet.</p>
-        <p class="empty-hint">Add a branch first, then create staff accounts for it above.</p>
+      <div class="header-actions">
+        <span class="count-chip">{{ staff.length }} {{ staff.length === 1 ? "member" : "members" }}</span>
+        <button type="button" @click="openAddModal">+ Add staff</button>
       </div>
     </div>
+
+    <div class="card stats-bar">
+      <div class="stat-item">
+        <span class="stat-value">{{ staff.length }}</span>
+        <span class="stat-label">Total staff</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-value stat-active">{{ activeCount }}</span>
+        <span class="stat-label">Active</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-value" :class="{ 'stat-danger': inactiveCount > 0 }">{{ inactiveCount }}</span>
+        <span class="stat-label">Inactive</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-value">{{ branches.length }}</span>
+        <span class="stat-label">Branches covered</span>
+      </div>
+    </div>
+
+    <Modal v-if="showAddModal" title="Add a staff member" @close="closeAddModal">
+      <form @submit.prevent="onSubmit">
+        <div class="new-staff-grid">
+          <div class="field">
+            <label for="staff-name">Name</label>
+            <input id="staff-name" v-model="form.name" required placeholder="Jane Dela Cruz" autofocus />
+          </div>
+          <div class="field">
+            <label for="staff-email">Email</label>
+            <input id="staff-email" v-model="form.email" type="email" required placeholder="jane@za-company.com" />
+          </div>
+          <div class="field">
+            <label for="staff-password">Password</label>
+            <input id="staff-password" v-model="form.password" type="password" required minlength="8" placeholder="At least 8 characters" />
+          </div>
+          <div class="field">
+            <label for="staff-branch">Branch</label>
+            <CustomSelect id="staff-branch" v-model="form.branchId" :options="branchOptions" placeholder="Select a branch" />
+          </div>
+        </div>
+        <p v-if="error" class="error-message">{{ error }}</p>
+        <div class="modal-actions">
+          <button type="button" class="secondary" :disabled="submitting" @click="closeAddModal">Cancel</button>
+          <button type="submit" :disabled="submitting">{{ submitting ? "Adding..." : "Add staff" }}</button>
+        </div>
+      </form>
+    </Modal>
+
+    <div class="card filters-card">
+      <div class="field search-field">
+        <label for="staff-search">Search</label>
+        <input id="staff-search" v-model="search" placeholder="Search by name or email" />
+      </div>
+      <div class="field">
+        <label for="staff-branch-filter">Branch</label>
+        <CustomSelect id="staff-branch-filter" v-model="branchFilter" :options="branchFilterOptions" placeholder="All branches" />
+      </div>
+      <div class="field">
+        <label for="staff-status-filter">Status</label>
+        <CustomSelect id="staff-status-filter" v-model="statusFilter" :options="statusOptions" placeholder="All statuses" />
+      </div>
+    </div>
+
+    <ConfirmDeleteModal
+      :open="!!deleteTarget"
+      :title="`Delete &quot;${deleteTarget?.name}&quot;?`"
+      message="This cannot be undone."
+      :loading="deleting"
+      :error="deleteModalError"
+      @confirm="confirmDelete"
+      @cancel="cancelDelete"
+    />
+
+    <ConfirmModal
+      :open="!!toggleTarget"
+      :title="toggleTarget?.is_active ? `Deactivate &quot;${toggleTarget?.name}&quot;?` : `Activate &quot;${toggleTarget?.name}&quot;?`"
+      :message="
+        toggleTarget?.is_active
+          ? 'They will lose access to their account until reactivated.'
+          : 'They will regain access to their account.'
+      "
+      :confirm-label="toggleTarget?.is_active ? 'Deactivate' : 'Activate'"
+      loading-label="Saving..."
+      :variant="toggleTarget?.is_active ? 'danger' : 'primary'"
+      :loading="toggling"
+      :error="toggleModalError"
+      @confirm="confirmToggle"
+      @cancel="cancelToggle"
+    />
+
+    <p v-if="rowError" class="error-message top-error">{{ rowError }}</p>
+
+    <p v-if="loading" class="state-message">Loading staff...</p>
+    <div v-else-if="!filteredStaff.length" class="card state-card">
+      <div class="empty-state">
+        <template v-if="staff.length">
+          <p>No staff match your filters.</p>
+          <p class="empty-hint">Try clearing the search or filters above.</p>
+        </template>
+        <template v-else>
+          <p>No staff yet.</p>
+          <p class="empty-hint">Add a branch first, then create staff accounts for it above.</p>
+        </template>
+      </div>
+    </div>
+
+    <template v-else>
+      <div class="staff-grid">
+        <div v-for="s in pagedStaff" :key="s.id" class="staff-card">
+          <div class="staff-card-top">
+            <span class="avatar">{{ initials(s.name) }}</span>
+            <span class="badge" :class="s.is_active ? 'active' : 'inactive'">
+              {{ s.is_active ? "Active" : "Inactive" }}
+            </span>
+          </div>
+          <div class="staff-card-body">
+            <div class="staff-card-name">{{ s.name }}</div>
+            <div class="staff-card-email">{{ s.email }}</div>
+            <div class="staff-card-branch">
+              <span class="branch-dot"></span>
+              {{ branchName(s.branch_id) }}
+            </div>
+          </div>
+          <div class="staff-card-actions">
+            <button
+              class="secondary"
+              :class="s.is_active ? 'toggle-off' : 'toggle-on'"
+              :disabled="togglingId === s.id"
+              @click="onToggleActive(s)"
+            >
+              {{ togglingId === s.id ? "Saving..." : s.is_active ? "Deactivate" : "Activate" }}
+            </button>
+            <button
+              v-if="!s.is_active"
+              class="secondary danger"
+              :disabled="deletingId === s.id"
+              @click="onDelete(s)"
+            >
+              {{ deletingId === s.id ? "Deleting..." : "Delete" }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="totalPages > 1" class="pagination">
+        <button class="secondary" :disabled="currentPage === 1" @click="goToPage(currentPage - 1)">Prev</button>
+        <button
+          v-for="page in totalPages"
+          :key="page"
+          class="page-btn"
+          :class="{ active: page === currentPage }"
+          @click="goToPage(page)"
+        >
+          {{ page }}
+        </button>
+        <button class="secondary" :disabled="currentPage === totalPages" @click="goToPage(currentPage + 1)">Next</button>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -153,15 +370,65 @@ onMounted(refresh);
   margin: 0;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
 .count-chip {
   flex-shrink: 0;
-  background: rgba(15, 110, 110, 0.1);
+  background: var(--color-primary-soft);
   color: var(--color-primary);
   font-size: 0.85rem;
   font-weight: 600;
   padding: 0.35rem 0.85rem;
   border-radius: 999px;
   white-space: nowrap;
+}
+
+.stats-bar {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 1rem 0;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex: 1 1 140px;
+  padding: 0 1.25rem;
+  border-left: 1px solid var(--color-border);
+}
+
+.stat-item:first-child {
+  border-left: none;
+  padding-left: 0;
+}
+
+.stat-label {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.stat-value {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.stat-active {
+  color: var(--color-success);
+}
+
+.stat-danger {
+  color: var(--color-danger);
 }
 
 .card {
@@ -180,56 +447,30 @@ onMounted(refresh);
   margin-bottom: 0.25rem;
 }
 
-.table-card {
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 0.25rem;
+}
+
+.filters-card {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 1rem;
+  align-items: end;
+}
+
+.filters-card .field {
+  margin-bottom: 0;
+}
+
+.top-error {
+  margin: -0.75rem 0 1.25rem;
+}
+
+.state-card {
   padding: 0;
-  overflow: hidden;
-}
-
-.table-card table {
-  margin: 0;
-}
-
-.table-card th,
-.table-card td {
-  padding: 0.85rem 1.5rem;
-}
-
-.table-card tbody tr:hover {
-  background: var(--color-bg);
-}
-
-.person-cell {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.avatar {
-  flex-shrink: 0;
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  background: var(--color-primary);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.8rem;
-  font-weight: 700;
-}
-
-.primary-cell {
-  font-weight: 600;
-  color: var(--color-primary-dark);
-}
-
-.secondary-cell {
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
-}
-
-.actions-cell {
-  text-align: right;
 }
 
 .state-message {
@@ -254,9 +495,188 @@ onMounted(refresh);
   margin-top: 0.35rem;
 }
 
+.staff-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.staff-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  border-top: 3px solid var(--color-primary);
+  box-shadow: var(--shadow);
+  padding: 1.25rem;
+  transition: transform 0.15s ease;
+}
+
+.staff-card:hover {
+  transform: translateY(-2px);
+}
+
+.staff-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.avatar {
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.staff-card-body {
+  min-width: 0;
+}
+
+.staff-card-name {
+  font-weight: 600;
+  font-size: 1.05rem;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.staff-card-email {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  margin-top: 0.15rem;
+  word-break: break-word;
+}
+
+.staff-card-branch {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--color-text);
+  margin-top: 0.6rem;
+}
+
+.branch-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary);
+}
+
+.staff-card-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: auto;
+}
+
+.staff-card-actions button {
+  flex: 1;
+  font-size: 0.85rem;
+  padding: 0.45rem 0.6rem;
+}
+
+.staff-card-actions .danger {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.staff-card-actions .danger:hover {
+  background: rgba(255, 77, 77, 0.1);
+}
+
+.toggle-on {
+  color: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.toggle-on:hover {
+  background: rgba(46, 204, 143, 0.12);
+}
+
+.toggle-off {
+  color: #ffb020;
+  border-color: #ffb020;
+}
+
+.toggle-off:hover {
+  background: rgba(255, 176, 32, 0.12);
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+.page-btn {
+  min-width: 34px;
+  height: 34px;
+  padding: 0 0.5rem;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.page-btn:hover {
+  background: var(--color-bg);
+}
+
+.page-btn.active {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+@media (max-width: 900px) {
+  .filters-card {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 640px) {
   .new-staff-grid {
     grid-template-columns: 1fr;
+  }
+
+  .stat-item {
+    flex-basis: calc(50% - 0.6rem);
+  }
+
+  .stat-item:nth-child(2) {
+    border-left: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .header-actions {
+    justify-content: space-between;
+  }
+
+  .staff-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .stat-item {
+    flex-basis: 100%;
+    border-left: none;
+    padding-left: 0;
   }
 }
 </style>

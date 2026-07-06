@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import require_admin
+from app.core.deps import require_admin, require_admin_password
 from app.crud.branches import get_branch
-from app.crud.users import create_user, get_user, get_user_by_email, list_staff, update_user
+from app.crud.users import create_user, delete_user, get_user, get_user_by_email, list_staff, update_user
 from app.schemas.user import StaffCreate, StaffOut, StaffUpdate
 
 router = APIRouter(prefix="/staff", tags=["staff"], dependencies=[Depends(require_admin)])
@@ -62,3 +62,20 @@ def update_staff_endpoint(
         password=payload.password,
     )
     return StaffOut.model_validate(updated)
+
+
+@router.delete("/{staff_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_staff_endpoint(
+    staff_id: str, db: Session = Depends(get_db), _: object = Depends(require_admin_password)
+) -> None:
+    staff = _get_staff_or_404(db, staff_id)
+    if staff.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Deactivate this staff member before deleting them",
+        )
+    if not delete_user(db, staff):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This staff member has existing sales, delivery, or stock records and cannot be deleted.",
+        )

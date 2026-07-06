@@ -10,6 +10,7 @@ class StockItemCreate(BaseModel):
 
 
 class StockItemUpdate(BaseModel):
+    name: str
     unit: str
     price: float
 

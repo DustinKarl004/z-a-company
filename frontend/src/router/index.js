@@ -6,7 +6,10 @@ import AdminDashboardView from "../views/AdminDashboardView.vue";
 import AdminBranchesView from "../views/AdminBranchesView.vue";
 import AdminStaffView from "../views/AdminStaffView.vue";
 import AdminStockItemsView from "../views/AdminStockItemsView.vue";
-import StaffHomeView from "../views/StaffHomeView.vue";
+import StaffLayout from "../views/StaffLayout.vue";
+import StaffDeliveriesView from "../views/StaffDeliveriesView.vue";
+import StaffStockCountView from "../views/StaffStockCountView.vue";
+import StaffSalesView from "../views/StaffSalesView.vue";
 import NotFoundView from "../views/NotFoundView.vue";
 
 const routes = [
@@ -25,9 +28,14 @@ const routes = [
   },
   {
     path: "/staff",
-    name: "staff-home",
-    component: StaffHomeView,
+    component: StaffLayout,
     meta: { requiresRole: "staff" },
+    children: [
+      { path: "", redirect: { name: "staff-deliveries" } },
+      { path: "deliveries", name: "staff-deliveries", component: StaffDeliveriesView },
+      { path: "stock-count", name: "staff-stock-count", component: StaffStockCountView },
+      { path: "sales", name: "staff-sales", component: StaffSalesView },
+    ],
   },
   { path: "/", redirect: "/login" },
   { path: "/:pathMatch(.*)*", name: "not-found", component: NotFoundView },
@@ -42,7 +50,7 @@ router.beforeEach((to) => {
   const auth = useAuthStore();
 
   if (to.meta.guestOnly && auth.isAuthenticated) {
-    return auth.role === "admin" ? { name: "admin-dashboard" } : { name: "staff-home" };
+    return auth.role === "admin" ? { name: "admin-dashboard" } : { name: "staff-deliveries" };
   }
 
   if (to.meta.requiresRole) {
@@ -50,7 +58,7 @@ router.beforeEach((to) => {
       return { name: "login" };
     }
     if (auth.role !== to.meta.requiresRole) {
-      return auth.role === "admin" ? { name: "admin-dashboard" } : { name: "staff-home" };
+      return auth.role === "admin" ? { name: "admin-dashboard" } : { name: "staff-deliveries" };
     }
   }
 

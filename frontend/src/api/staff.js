@@ -14,3 +14,7 @@ export function createStaff({ name, email, password, branchId }) {
 export function updateStaff(id, payload) {
   return apiFetch(`/staff/${id}`, { method: "PATCH", body: payload });
 }
+
+export function deleteStaff(id, password) {
+  return apiFetch(`/staff/${id}`, { method: "DELETE", body: { password } });
+}

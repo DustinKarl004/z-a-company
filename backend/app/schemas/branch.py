@@ -7,6 +7,10 @@ class BranchCreate(BaseModel):
     name: str
 
 
+class BranchUpdate(BaseModel):
+    name: str
+
+
 class BranchOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

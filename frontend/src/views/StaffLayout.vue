@@ -8,10 +8,9 @@ const router = useRouter();
 const route = useRoute();
 
 const navLinks = [
-  { name: "admin-dashboard", label: "Dashboard" },
-  { name: "admin-branches", label: "Branches" },
-  { name: "admin-staff", label: "Staff" },
-  { name: "admin-stock-items", label: "Stock Items" },
+  { name: "staff-deliveries", label: "Deliveries" },
+  { name: "staff-stock-count", label: "Stock Count" },
+  { name: "staff-sales", label: "Sales" },
 ];
 
 const menuOpen = ref(false);

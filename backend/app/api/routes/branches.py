@@ -1,12 +1,19 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import require_admin
-from app.crud.branches import create_branch, list_branches
-from app.schemas.branch import BranchCreate, BranchOut
+from app.core.deps import require_admin, require_admin_password
+from app.crud.branches import create_branch, delete_branch, get_branch, list_branches, update_branch
+from app.schemas.branch import BranchCreate, BranchOut, BranchUpdate
 
 router = APIRouter(prefix="/branches", tags=["branches"], dependencies=[Depends(require_admin)])
+
+
+def _get_branch_or_404(db: Session, branch_id: str):
+    branch = get_branch(db, branch_id)
+    if branch is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Branch not found")
+    return branch
 
 
 @router.post("", response_model=BranchOut, status_code=201)
@@ -18,3 +25,24 @@ def create_branch_endpoint(payload: BranchCreate, db: Session = Depends(get_db))
 @router.get("", response_model=list[BranchOut])
 def list_branches_endpoint(db: Session = Depends(get_db)) -> list[BranchOut]:
     return [BranchOut.model_validate(b) for b in list_branches(db)]
+
+
+@router.patch("/{branch_id}", response_model=BranchOut)
+def update_branch_endpoint(
+    branch_id: str, payload: BranchUpdate, db: Session = Depends(get_db)
+) -> BranchOut:
+    branch = _get_branch_or_404(db, branch_id)
+    branch = update_branch(db, branch, name=payload.name)
+    return BranchOut.model_validate(branch)
+
+
+@router.delete("/{branch_id}", status_code=204)
+def delete_branch_endpoint(
+    branch_id: str, db: Session = Depends(get_db), _: object = Depends(require_admin_password)
+) -> None:
+    branch = _get_branch_or_404(db, branch_id)
+    if not delete_branch(db, branch):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This branch still has staff or records linked to it and cannot be deleted.",
+        )

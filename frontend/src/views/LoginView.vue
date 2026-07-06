@@ -18,7 +18,7 @@ async function onSubmit() {
   loading.value = true;
   try {
     await auth.login(email.value, password.value);
-    router.push(auth.role === "admin" ? { name: "admin-branches" } : { name: "staff-home" });
+    router.push(auth.role === "admin" ? { name: "admin-dashboard" } : { name: "staff-deliveries" });
   } catch (e) {
     error.value = e instanceof ApiError ? e.detail || "Login failed" : "Login failed";
   } finally {
@@ -31,7 +31,38 @@ async function onSubmit() {
   <div class="login-page">
     <section class="left">
       <div class="left-inner">
-        <img class="brand-logo" src="/logo.svg" alt="Z.A. Company" />
+        <div class="inv-scene" aria-hidden="true">
+          <div class="inv-icon inv-box">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 8l-9-5-9 5 9 5 9-5z" />
+              <path d="M3 8v8l9 5 9-5V8" />
+              <path d="M12 13v8" />
+            </svg>
+          </div>
+          <div class="inv-icon inv-chart">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 3v18h18" />
+              <path d="M7 16v-4M12 16V8m5 8v-6" />
+            </svg>
+          </div>
+          <div class="inv-icon inv-truck">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 3h13v13H1z" />
+              <path d="M14 8h4l3 3v5h-7z" />
+              <circle cx="5.5" cy="18.5" r="1.8" />
+              <circle cx="17.5" cy="18.5" r="1.8" />
+            </svg>
+          </div>
+          <div class="inv-icon inv-clip">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 2h6v3H9z" />
+              <path d="M6 4h12v18H6z" />
+              <path d="M9 11l2 2 4-4" />
+            </svg>
+          </div>
+          <span class="inv-orbit inv-orbit-a"></span>
+          <span class="inv-orbit inv-orbit-b"></span>
+        </div>
         <h1 class="brand-title">Z.A. Company</h1>
         <p class="brand-tagline">Stocks, sales, and profit — tracked per branch, every day.</p>
       </div>
@@ -39,9 +70,12 @@ async function onSubmit() {
 
     <section class="right">
       <div class="auth-box">
-        <div class="mobile-logo">
-          <img class="mobile-logo-img" src="/logo.svg" alt="Z.A. Company" />
+        <div class="right-logo">
+          <img class="right-logo-img" src="/logo.png" alt="Z.A. Company" />
         </div>
+
+        <h2 class="welcome-title">Welcome back</h2>
+        <p class="welcome-subtitle">Sign in to manage your branch.</p>
 
         <div class="tab-sw">
           <button class="tab-btn active" type="button">sign in</button>
@@ -138,11 +172,114 @@ async function onSubmit() {
   text-align: center;
 }
 
-.brand-logo {
-  width: 96px;
-  height: 96px;
-  margin-bottom: 1.5rem;
-  filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.25));
+.inv-scene {
+  position: relative;
+  height: 190px;
+  margin-bottom: 1.75rem;
+}
+
+.inv-icon {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(2px);
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+  animation: inv-float 4.5s ease-in-out infinite;
+}
+
+.inv-box {
+  left: 50%;
+  top: 6px;
+  transform: translateX(-50%);
+  animation-delay: 0s;
+}
+
+.inv-chart {
+  left: 8%;
+  top: 78px;
+  animation-delay: 0.9s;
+}
+
+.inv-truck {
+  right: 6%;
+  top: 84px;
+  animation-delay: 0.4s;
+}
+
+.inv-clip {
+  left: 30%;
+  top: 148px;
+  animation-delay: 1.4s;
+}
+
+.inv-orbit {
+  position: absolute;
+  border-radius: 50%;
+  border: 1.5px dashed rgba(255, 255, 255, 0.25);
+  animation: inv-spin linear infinite;
+}
+
+.inv-orbit-a {
+  width: 220px;
+  height: 220px;
+  top: -15px;
+  left: 50%;
+  margin-left: -110px;
+  animation-duration: 22s;
+}
+
+.inv-orbit-b {
+  width: 150px;
+  height: 150px;
+  top: 20px;
+  left: 50%;
+  margin-left: -75px;
+  animation-duration: 16s;
+  animation-direction: reverse;
+}
+
+@keyframes inv-float {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-14px) rotate(-4deg);
+  }
+}
+
+.inv-box {
+  animation-name: inv-float-box;
+}
+
+@keyframes inv-float-box {
+  0%, 100% {
+    transform: translateX(-50%) translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateX(-50%) translateY(-14px) rotate(3deg);
+  }
+}
+
+@keyframes inv-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inv-icon,
+  .inv-orbit {
+    animation: none;
+  }
 }
 
 .brand-title {
@@ -170,13 +307,32 @@ async function onSubmit() {
 .auth-box {
   width: 100%;
   max-width: 420px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+  padding: 2.5rem 2.25rem;
 }
 
-.mobile-logo-img {
+.right-logo-img {
   display: block;
-  width: 52px;
-  height: 52px;
-  margin: 0 auto 1.25rem;
+  width: 190px;
+  height: 190px;
+  margin: 0 auto 1rem;
+  filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.35));
+}
+
+.welcome-title {
+  text-align: center;
+  font-size: 1.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.welcome-subtitle {
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 0.95rem;
+  margin: 0 0 1.75rem;
 }
 
 .tab-sw {
@@ -200,11 +356,11 @@ async function onSubmit() {
 
 .tab-btn:hover {
   background: transparent;
-  color: var(--color-primary-dark);
+  color: var(--color-text);
 }
 
 .tab-btn.active {
-  color: var(--color-primary-dark);
+  color: var(--color-text);
   border-bottom-color: var(--color-accent);
 }
 
@@ -226,7 +382,7 @@ async function onSubmit() {
 .fg input:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(15, 110, 110, 0.15);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
 }
 
 .inpw {
@@ -255,7 +411,7 @@ async function onSubmit() {
 }
 
 .tpw:hover {
-  background: rgba(15, 110, 110, 0.08);
+  background: var(--color-primary-soft);
   color: var(--color-primary);
 }
 
@@ -291,10 +447,6 @@ async function onSubmit() {
   margin-top: 1rem;
 }
 
-.mobile-logo {
-  display: none;
-}
-
 @media (max-width: 860px) {
   .login-page {
     flex-direction: column;
@@ -304,12 +456,17 @@ async function onSubmit() {
     display: none;
   }
 
-  .mobile-logo {
-    display: block;
-  }
-
   .right {
     padding: 1.5rem;
+  }
+
+  .auth-box {
+    padding: 2rem 1.5rem;
+  }
+
+  .right-logo-img {
+    width: 140px;
+    height: 140px;
   }
 }
 </style>

@@ -4,9 +4,10 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import decode_access_token
+from app.core.security import decode_access_token, verify_password
 from app.crud.users import get_user
 from app.models.user import User
+from app.schemas.common import PasswordConfirm
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
@@ -50,4 +51,10 @@ def require_staff(user: User = Depends(get_current_user)) -> User:
 def require_staff_or_admin(user: User = Depends(get_current_user)) -> User:
     if user.role not in ("staff", "admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access required")
+    return user
+
+
+def require_admin_password(payload: PasswordConfirm, user: User = Depends(require_admin)) -> User:
+    if not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect password")
     return user

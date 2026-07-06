@@ -1,9 +1,10 @@
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { getMonthly, getOverview } from "../api/dashboard";
+import MonthYearPicker from "../components/MonthYearPicker.vue";
 
-const SERIES_COLORS = ["#2a78d6", "#1baf7a", "#eda100", "#4a3aa7", "#e34948", "#e87ba4", "#eb6834", "#008300"];
-const BAR_COLOR = "#0f6e6e";
+const SERIES_COLORS = ["#ff2d4d", "#ff8a3d", "#ffe14d", "#4dd6ff", "#8a6bff", "#4dffb0", "#ff4dd2", "#c8c8c8"];
+const BAR_COLOR = "#ff2d4d";
 
 const overview = ref(null);
 const monthly = ref(null);
@@ -13,11 +14,6 @@ const monthlyLoading = ref(false);
 const now = new Date();
 const selectedYear = ref(now.getFullYear());
 const selectedMonth = ref(now.getMonth() + 1);
-
-const monthNames = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
 
 function peso(amount) {
   return `₱${amount.toFixed(2)}`;
@@ -48,6 +44,10 @@ onMounted(async () => {
   await loadMonthly();
 });
 
+watch([selectedYear, selectedMonth], loadMonthly);
+
+const alertCount = computed(() => overview.value?.branches.filter((b) => b.has_shortfall).length || 0);
+
 // --- Bar chart: sales today by branch ---
 const BAR_CHART_W = 600;
 const BAR_CHART_H = 220;
@@ -68,6 +68,7 @@ const barChart = computed(() => {
       id: b.branch_id,
       name: b.branch_name,
       value: b.total_sales,
+      hasShortfall: b.has_shortfall,
       x: bandCenter - barWidth / 2,
       y: BAR_MARGIN.top + innerH - barHeight,
       width: barWidth,
@@ -106,7 +107,7 @@ const lineChart = computed(() => {
     const color = SERIES_COLORS[si % SERIES_COLORS.length];
     const points = daily.map((d, i) => ({ x: xAt(i), y: yAt(d.branch_sales[b.branch_id] || 0) }));
     const path = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
-    return { id: b.branch_id, name: b.branch_name, color, points, path };
+    return { id: b.branch_id, name: b.branch_name, color, points, path, total: b.total_sales };
   });
 
   const gridLines = [0, 0.25, 0.5, 0.75, 1].map((f) => {
@@ -154,7 +155,7 @@ const hoverTooltip = computed(() => {
 </script>
 
 <template>
-  <div>
+  <div class="dash">
     <div class="page-header">
       <div>
         <h1>Dashboard</h1>
@@ -171,100 +172,82 @@ const hoverTooltip = computed(() => {
           <span class="stat-value">{{ peso(overview.total_sales) }}</span>
         </div>
         <div class="card stat-card">
-          <span class="stat-label">Branches / Staff</span>
-          <span class="stat-value">{{ overview.branch_count }} / {{ overview.staff_count }}</span>
+          <span class="stat-label">This month's sales</span>
+          <span class="stat-value">{{ monthly ? peso(monthly.total_sales) : "—" }}</span>
+        </div>
+        <div class="card stat-card">
+          <span class="stat-label">Branches</span>
+          <span class="stat-value">{{ overview.branch_count }}</span>
+        </div>
+        <div class="card stat-card" :class="{ 'stat-card-alert': alertCount > 0 }">
+          <span class="stat-label">Stock alerts</span>
+          <span class="stat-value">{{ alertCount }}</span>
         </div>
       </div>
 
       <div class="card chart-card" v-if="overview.branches.length">
         <h2 class="card-title">Sales today by branch</h2>
-        <svg
-          class="bar-chart"
-          :viewBox="`0 0 ${BAR_CHART_W} ${BAR_CHART_H}`"
-          preserveAspectRatio="xMidYMid meet"
-          role="img"
-          aria-label="Bar chart of today's sales per branch"
-        >
-          <line
-            class="baseline"
-            :x1="0"
-            :x2="BAR_CHART_W"
-            :y1="barChart.baselineY"
-            :y2="barChart.baselineY"
-          />
-          <g v-for="bar in barChart.bars" :key="bar.id">
-            <rect
-              class="bar"
-              :class="{ 'bar-hover': hoveredBar === bar.id }"
-              :x="bar.x"
-              :y="bar.y"
-              :width="bar.width"
-              :height="Math.max(bar.height, 1)"
-              rx="4"
-              :fill="BAR_COLOR"
-              tabindex="0"
-              @pointerenter="hoveredBar = bar.id"
-              @pointerleave="hoveredBar = null"
-              @focus="hoveredBar = bar.id"
-              @blur="hoveredBar = null"
+        <div class="chart-scroll">
+          <svg
+            class="bar-chart"
+            :viewBox="`0 0 ${BAR_CHART_W} ${BAR_CHART_H}`"
+            preserveAspectRatio="xMidYMid meet"
+            role="img"
+            aria-label="Bar chart of today's sales per branch"
+          >
+            <defs>
+              <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" :stop-color="BAR_COLOR" stop-opacity="1" />
+                <stop offset="100%" :stop-color="BAR_COLOR" stop-opacity="0.35" />
+              </linearGradient>
+            </defs>
+            <line
+              class="baseline"
+              :x1="0"
+              :x2="BAR_CHART_W"
+              :y1="barChart.baselineY"
+              :y2="barChart.baselineY"
             />
-            <text class="bar-value" :x="bar.labelX" :y="bar.y - 8" text-anchor="middle">
-              {{ peso(bar.value) }}
-            </text>
-            <text class="bar-name" :x="bar.labelX" :y="bar.nameY" text-anchor="middle">
-              {{ bar.name }}
-            </text>
-          </g>
-        </svg>
+            <g v-for="bar in barChart.bars" :key="bar.id">
+              <rect
+                class="bar"
+                :class="{ 'bar-hover': hoveredBar === bar.id }"
+                :x="bar.x"
+                :y="bar.y"
+                :width="bar.width"
+                :height="Math.max(bar.height, 1)"
+                rx="4"
+                fill="url(#barGradient)"
+                tabindex="0"
+                @pointerenter="hoveredBar = bar.id"
+                @pointerleave="hoveredBar = null"
+                @focus="hoveredBar = bar.id"
+                @blur="hoveredBar = null"
+              />
+              <circle v-if="bar.hasShortfall" class="alert-dot" :cx="bar.x + bar.width / 2" :cy="bar.y - 16" r="3" />
+              <text class="bar-value" :x="bar.labelX" :y="bar.y - 8" text-anchor="middle">
+                {{ peso(bar.value) }}
+              </text>
+              <text class="bar-name" :x="bar.labelX" :y="bar.nameY" text-anchor="middle">
+                {{ bar.name }}
+              </text>
+            </g>
+          </svg>
+        </div>
       </div>
 
-      <div class="card table-card">
-        <h2 class="card-title">Per-branch — today</h2>
-        <table v-if="overview.branches.length">
-          <thead>
-            <tr>
-              <th>Branch</th>
-              <th>Sales</th>
-              <th>Stock</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="b in overview.branches" :key="b.branch_id">
-              <td class="primary-cell">{{ b.branch_name }}</td>
-              <td>{{ peso(b.total_sales) }}</td>
-              <td>
-                <span v-if="b.has_shortfall" class="badge inactive">Shortfall</span>
-                <span v-else class="badge active">OK</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <p v-else class="empty-hint">No branches yet.</p>
-      </div>
-
-      <div class="card table-card">
+      <div class="card chart-card">
         <div class="monthly-header">
-          <h2 class="card-title">Monthly rollup</h2>
-          <div class="month-picker">
-            <select v-model.number="selectedMonth" @change="loadMonthly">
-              <option v-for="(name, i) in monthNames" :key="name" :value="i + 1">{{ name }}</option>
-            </select>
-            <input v-model.number="selectedYear" type="number" @change="loadMonthly" />
-          </div>
+          <h2 class="card-title">Monthly trend</h2>
+          <MonthYearPicker v-model:year="selectedYear" v-model:month="selectedMonth" />
         </div>
 
         <p v-if="monthlyLoading" class="state-message">Loading...</p>
         <template v-else-if="monthly">
-          <template v-if="monthly.daily?.length">
-            <ul class="legend">
-              <li v-for="s in lineChart.series" :key="s.id">
-                <span class="legend-swatch" :style="{ background: s.color }"></span>
-                {{ s.name }}
-              </li>
-            </ul>
-
-            <div class="line-chart-wrap">
-              <svg
+          <div v-if="monthly.daily?.length" class="monthly-body">
+            <div class="line-chart-scroll">
+              <div class="line-chart-wrap">
+                <svg
                 ref="lineChartEl"
                 class="line-chart"
                 :viewBox="`0 0 ${LINE_CHART_W} ${LINE_CHART_H}`"
@@ -346,29 +329,21 @@ const hoverTooltip = computed(() => {
                 </div>
               </div>
             </div>
-          </template>
+            </div>
 
-          <table v-if="monthly.branches.length">
-            <thead>
-              <tr>
-                <th>Branch</th>
-                <th>Sales</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="b in monthly.branches" :key="b.branch_id">
-                <td class="primary-cell">{{ b.branch_name }}</td>
-                <td>{{ peso(b.total_sales) }}</td>
-              </tr>
-            </tbody>
-            <tfoot>
-              <tr>
-                <td class="primary-cell">All branches</td>
-                <td>{{ peso(monthly.total_sales) }}</td>
-              </tr>
-            </tfoot>
-          </table>
-          <p v-else class="empty-hint">No branches yet.</p>
+            <ul class="branch-totals">
+              <li v-for="s in lineChart.series" :key="s.id">
+                <span class="legend-swatch" :style="{ background: s.color }"></span>
+                <span class="branch-totals-name">{{ s.name }}</span>
+                <span class="branch-totals-value">{{ peso(s.total) }}</span>
+              </li>
+              <li class="branch-totals-all">
+                <span class="branch-totals-name">All branches</span>
+                <span class="branch-totals-value">{{ peso(monthly.total_sales) }}</span>
+              </li>
+            </ul>
+          </div>
+          <p v-else class="empty-hint">No sales recorded this month yet.</p>
         </template>
       </div>
     </template>
@@ -376,18 +351,29 @@ const hoverTooltip = computed(() => {
 </template>
 
 <style scoped>
+.dash {
+  --dash-glow: rgba(255, 45, 77, 0.35);
+}
+
 .page-header {
   margin-bottom: 1.75rem;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .page-header h1 {
-  font-size: 1.6rem;
+  font-size: 1.7rem;
   margin-bottom: 0.35rem;
+  color: var(--color-text);
+  letter-spacing: 0.02em;
 }
 
 .page-subtitle {
   color: var(--color-text-muted);
   margin: 0;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .state-message {
@@ -398,44 +384,69 @@ const hoverTooltip = computed(() => {
 
 .stat-row {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 1rem;
   margin-bottom: 1.5rem;
+}
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 1.5rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--color-primary), transparent 70%);
 }
 
 .stat-card {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.5rem;
 }
 
 .stat-label {
-  font-size: 0.85rem;
+  font-size: 0.75rem;
   color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .stat-value {
-  font-size: 1.4rem;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 1.6rem;
   font-weight: 700;
-  color: var(--color-primary-dark);
+  color: var(--color-text);
+  text-shadow: 0 0 18px var(--dash-glow);
 }
 
-.card {
+.stat-card-alert .stat-value {
+  color: var(--color-primary);
+}
+
+.chart-card {
   margin-bottom: 1.5rem;
 }
 
-.table-card {
-  padding: 1.5rem;
-}
-
 .card-title {
-  font-size: 1.05rem;
-  margin-bottom: 1rem;
+  font-size: 0.95rem;
+  margin-bottom: 1.25rem;
+  color: var(--color-text);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
-.primary-cell {
-  font-weight: 600;
-  color: var(--color-primary-dark);
+.card-title::before {
+  background: var(--color-primary);
+  box-shadow: 0 0 8px var(--dash-glow);
 }
 
 .empty-hint {
@@ -455,27 +466,13 @@ const hoverTooltip = computed(() => {
   margin-bottom: 0;
 }
 
-.month-picker {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.month-picker input {
-  width: 90px;
-}
-
-tfoot td {
-  border-top: 2px solid var(--color-border);
-  border-bottom: none;
-  font-weight: 700;
-}
-
-.chart-card {
-  padding: 1.5rem;
+.chart-scroll {
+  overflow-x: auto;
 }
 
 .bar-chart {
   width: 100%;
+  min-width: 480px;
   height: 220px;
   overflow: visible;
 }
@@ -486,52 +483,49 @@ tfoot td {
 }
 
 .bar {
-  transition: opacity 0.1s ease;
+  transition: opacity 0.15s ease, filter 0.15s ease;
   cursor: pointer;
+  filter: drop-shadow(0 0 6px var(--dash-glow));
 }
 
 .bar-hover {
-  opacity: 0.8;
+  opacity: 0.85;
+  filter: drop-shadow(0 0 14px var(--dash-glow));
+}
+
+.alert-dot {
+  fill: #ffb84d;
+  filter: drop-shadow(0 0 4px rgba(255, 184, 77, 0.8));
 }
 
 .bar-value {
+  font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 12px;
   font-weight: 700;
-  fill: var(--color-primary-dark);
+  fill: var(--color-text);
 }
 
 .bar-name {
-  font-size: 12px;
+  font-size: 11px;
   fill: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
-.legend {
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  padding: 0;
-  margin: 0 0 1rem;
-  font-size: 0.85rem;
-  color: var(--color-text);
+.monthly-body {
+  display: grid;
+  grid-template-columns: 1fr 220px;
+  gap: 1.5rem;
+  align-items: start;
 }
 
-.legend li {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.legend-swatch {
-  display: inline-block;
-  width: 14px;
-  height: 3px;
-  border-radius: 2px;
+.line-chart-scroll {
+  overflow-x: auto;
 }
 
 .line-chart-wrap {
   position: relative;
-  margin-bottom: 1.5rem;
+  min-width: 560px;
 }
 
 .line-chart {
@@ -546,6 +540,7 @@ tfoot td {
 }
 
 .axis-label {
+  font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 10px;
   fill: var(--color-text-muted);
 }
@@ -554,6 +549,7 @@ tfoot td {
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
+  filter: drop-shadow(0 0 4px currentColor);
 }
 
 .crosshair {
@@ -571,19 +567,21 @@ tfoot td {
   top: 0;
   transform: translateX(-50%);
   background: var(--color-primary-dark);
+  border: 1px solid var(--color-border);
   color: #fff;
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 0.6rem 0.75rem;
   font-size: 0.8rem;
   pointer-events: none;
   white-space: nowrap;
-  box-shadow: var(--shadow);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
   z-index: 1;
 }
 
 .tooltip-date {
   font-weight: 700;
   margin-bottom: 0.35rem;
+  font-family: "SFMono-Regular", Consolas, monospace;
 }
 
 .tooltip-row {
@@ -606,11 +604,74 @@ tfoot td {
 
 .tooltip-value {
   font-weight: 700;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.branch-totals {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  border-left: 1px solid var(--color-border);
+  padding-left: 1.25rem;
+}
+
+.branch-totals li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.branch-totals-name {
+  flex: 1;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.branch-totals-value {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.branch-totals-all {
+  margin-top: 0.4rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.branch-totals-all .branch-totals-name,
+.branch-totals-all .branch-totals-value {
+  color: var(--color-primary);
 }
 
 @media (max-width: 860px) {
   .stat-row {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .monthly-body {
+    grid-template-columns: 1fr;
+  }
+
+  .branch-totals {
+    border-left: none;
+    border-top: 1px solid var(--color-border);
+    padding-left: 0;
+    padding-top: 1rem;
   }
 }
 

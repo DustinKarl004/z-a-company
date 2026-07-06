@@ -2,6 +2,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
+from app.models.sale import Sale
+from app.models.stock_count import StockCount
+from app.models.stock_delivery import StockDelivery
 from app.models.user import User
 
 
@@ -37,6 +40,21 @@ def create_user(
     db.commit()
     db.refresh(user)
     return user
+
+
+def user_has_related_records(db: Session, user_id: str) -> bool:
+    for model in (Sale, StockCount, StockDelivery):
+        if db.scalar(select(model.id).where(model.created_by_id == user_id).limit(1)) is not None:
+            return True
+    return False
+
+
+def delete_user(db: Session, user: User) -> bool:
+    if user_has_related_records(db, user.id):
+        return False
+    db.delete(user)
+    db.commit()
+    return True
 
 
 def list_staff(db: Session, *, branch_id: str | None = None) -> list[User]:
