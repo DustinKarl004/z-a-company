@@ -16,7 +16,7 @@ FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 check_port_free() {
   local port="$1"
   local label="$2"
-  if lsof -i ":$port" >/dev/null 2>&1; then
+  if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
     echo "Port $port is already in use (needed for $label)." >&2
     echo "Something else on this machine is using it — set ${label}_PORT to a free port and re-run." >&2
     exit 1
