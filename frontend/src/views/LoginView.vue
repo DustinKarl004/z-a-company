@@ -1,26 +1,90 @@
 <script setup>
-import { ref } from "vue";
+import { computed, nextTick, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "../stores/auth";
 import { ApiError } from "../api/client";
 
 const email = ref("");
 const password = ref("");
+const digits = ref(["", "", "", "", "", ""]);
+const digitRefs = ref([]);
+const needsTotpCode = ref(false);
 const error = ref("");
 const loading = ref(false);
 const showPassword = ref(false);
 
+const totpCode = computed(() => digits.value.join(""));
+
 const auth = useAuthStore();
 const router = useRouter();
+
+function setDigitRef(el, index) {
+  digitRefs.value[index] = el;
+}
+
+function focusDigit(index) {
+  digitRefs.value[index]?.focus();
+}
+
+function onDigitInput(index, event) {
+  const value = event.target.value.replace(/\D/g, "").slice(-1);
+  digits.value[index] = value;
+  if (value && index < 5) {
+    nextTick(() => focusDigit(index + 1));
+  }
+  if (totpCode.value.length === 6) {
+    onSubmit();
+  }
+}
+
+function onDigitKeydown(index, event) {
+  if (event.key === "Backspace" && !digits.value[index] && index > 0) {
+    digits.value[index - 1] = "";
+    nextTick(() => focusDigit(index - 1));
+  } else if (event.key === "ArrowLeft" && index > 0) {
+    focusDigit(index - 1);
+  } else if (event.key === "ArrowRight" && index < 5) {
+    focusDigit(index + 1);
+  }
+}
+
+function onDigitPaste(event) {
+  const pasted = event.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+  if (!pasted) return;
+  event.preventDefault();
+  digits.value = Array.from({ length: 6 }, (_, i) => pasted[i] || "");
+  nextTick(() => focusDigit(Math.min(pasted.length, 5)));
+  if (pasted.length === 6) {
+    onSubmit();
+  }
+}
+
+function backToPassword() {
+  needsTotpCode.value = false;
+  password.value = "";
+  digits.value = ["", "", "", "", "", ""];
+  error.value = "";
+}
 
 async function onSubmit() {
   error.value = "";
   loading.value = true;
   try {
-    await auth.login(email.value, password.value);
+    await auth.login(email.value, password.value, totpCode.value);
     router.push(auth.role === "admin" ? { name: "admin-dashboard" } : { name: "staff-deliveries" });
   } catch (e) {
-    error.value = e instanceof ApiError ? e.detail || "Login failed" : "Login failed";
+    if (e instanceof ApiError && e.detail === "Valid authenticator code required") {
+      if (needsTotpCode.value) {
+        error.value = "Invalid code. Please try again.";
+        digits.value = ["", "", "", "", "", ""];
+        nextTick(() => focusDigit(0));
+      } else {
+        needsTotpCode.value = true;
+        nextTick(() => focusDigit(0));
+      }
+    } else {
+      error.value = e instanceof ApiError ? e.detail || "Login failed" : "Login failed";
+    }
   } finally {
     loading.value = false;
   }
@@ -74,63 +138,105 @@ async function onSubmit() {
           <img class="right-logo-img" src="/logo.png" alt="Z.A. Company" />
         </div>
 
-        <h2 class="welcome-title">Welcome back</h2>
-        <p class="welcome-subtitle">Sign in to manage your branch.</p>
+        <template v-if="!needsTotpCode">
+          <h2 class="welcome-title">Welcome back</h2>
+          <p class="welcome-subtitle">Sign in to manage your branch.</p>
 
-        <div class="tab-sw">
-          <button class="tab-btn active" type="button">sign in</button>
-        </div>
-
-        <form class="fp active" @submit.prevent="onSubmit">
-          <div class="fg">
-            <label for="email">Email address</label>
-            <input
-              id="email"
-              v-model="email"
-              type="email"
-              maxlength="254"
-              autocomplete="email"
-              placeholder="you@za-company.com"
-              required
-            />
+          <div class="tab-sw">
+            <button class="tab-btn active" type="button">sign in</button>
           </div>
 
-          <div class="fg">
-            <label for="password">Password</label>
-            <div class="inpw">
+          <form class="fp active" @submit.prevent="onSubmit">
+            <div class="fg">
+              <label for="email">Email address</label>
               <input
-                id="password"
-                v-model="password"
-                :type="showPassword ? 'text' : 'password'"
-                autocomplete="current-password"
-                placeholder="••••••••"
+                id="email"
+                v-model="email"
+                type="email"
+                maxlength="254"
+                autocomplete="email"
+                placeholder="you@za-company.com"
                 required
               />
-              <button
-                type="button"
-                class="tpw"
-                :aria-label="showPassword ? 'Hide password' : 'Show password'"
-                @click="showPassword = !showPassword"
-              >
-                <svg v-if="showPassword" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-                  <line x1="1" y1="1" x2="23" y2="23" />
-                </svg>
-                <svg v-else width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                  <circle cx="12" cy="12" r="3" />
-                </svg>
-              </button>
             </div>
+
+            <div class="fg">
+              <label for="password">Password</label>
+              <div class="inpw">
+                <input
+                  id="password"
+                  v-model="password"
+                  :type="showPassword ? 'text' : 'password'"
+                  autocomplete="current-password"
+                  placeholder="••••••••"
+                  required
+                />
+                <button
+                  type="button"
+                  class="tpw"
+                  :aria-label="showPassword ? 'Hide password' : 'Show password'"
+                  @click="showPassword = !showPassword"
+                >
+                  <svg v-if="showPassword" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                    <line x1="1" y1="1" x2="23" y2="23" />
+                  </svg>
+                  <svg v-else width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <button class="btn-p" type="submit" :disabled="loading">
+              <span v-if="loading" class="spinner" aria-hidden="true"></span>
+              {{ loading ? "Signing in..." : "Sign in" }}
+            </button>
+
+            <p v-if="error" class="error-message">{{ error }}</p>
+          </form>
+        </template>
+
+        <template v-else>
+          <div class="totp-icon" aria-hidden="true">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="5" y="11" width="14" height="10" rx="2" />
+              <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+            </svg>
           </div>
+          <h2 class="welcome-title">Two-factor authentication</h2>
+          <p class="welcome-subtitle">Enter the 6-digit code from your authenticator app for <strong>{{ email }}</strong>.</p>
 
-          <button class="btn-p" type="submit" :disabled="loading">
-            <span v-if="loading" class="spinner" aria-hidden="true"></span>
-            {{ loading ? "Signing in..." : "Sign in" }}
-          </button>
+          <form class="fp active" @submit.prevent="onSubmit">
+            <div class="otp-row" @paste="onDigitPaste">
+              <input
+                v-for="(digit, i) in digits"
+                :key="i"
+                :ref="(el) => setDigitRef(el, i)"
+                v-model="digits[i]"
+                type="text"
+                inputmode="numeric"
+                autocomplete="one-time-code"
+                maxlength="1"
+                class="otp-box"
+                :class="{ 'otp-box-error': error }"
+                :autofocus="i === 0"
+                @input="onDigitInput(i, $event)"
+                @keydown="onDigitKeydown(i, $event)"
+              />
+            </div>
 
-          <p v-if="error" class="error-message">{{ error }}</p>
-        </form>
+            <button class="btn-p" type="submit" :disabled="loading || totpCode.length < 6">
+              <span v-if="loading" class="spinner" aria-hidden="true"></span>
+              {{ loading ? "Verifying..." : "Verify and sign in" }}
+            </button>
+
+            <p v-if="error" class="error-message">{{ error }}</p>
+
+            <button type="button" class="back-link" @click="backToPassword">← Back to sign in</button>
+          </form>
+        </template>
       </div>
     </section>
   </div>
@@ -445,6 +551,94 @@ async function onSubmit() {
 .error-message {
   text-align: center;
   margin-top: 1rem;
+}
+
+.totp-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 1.1rem;
+  border-radius: 50%;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.otp-row {
+  display: flex;
+  justify-content: center;
+  gap: 0.6rem;
+  margin: 1.75rem 0 0.5rem;
+}
+
+.otp-box {
+  width: 46px;
+  height: 54px;
+  text-align: center;
+  font-size: 1.4rem;
+  font-weight: 700;
+  padding: 0;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.otp-box:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
+}
+
+.otp-box-error {
+  border-color: var(--color-danger);
+}
+
+.back-link {
+  display: block;
+  width: 100%;
+  background: transparent;
+  color: var(--color-text-muted);
+  border: none;
+  padding: 0.5rem;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.back-link:hover {
+  background: transparent;
+  color: var(--color-text);
+}
+
+@media (max-width: 400px) {
+  .otp-row {
+    gap: 0.4rem;
+  }
+
+  .otp-box {
+    width: 40px;
+    height: 48px;
+    font-size: 1.2rem;
+  }
+}
+
+@media (max-width: 380px) {
+  .right {
+    padding: 1rem;
+  }
+
+  .auth-box {
+    padding: 1.75rem 1rem;
+  }
+
+  .otp-row {
+    gap: 0.3rem;
+  }
+
+  .otp-box {
+    width: 34px;
+    height: 44px;
+    font-size: 1.05rem;
+  }
 }
 
 @media (max-width: 860px) {

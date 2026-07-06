@@ -5,6 +5,7 @@ from app.api.routes import (
     branches,
     dashboard,
     sales,
+    settings,
     staff,
     stock_counts,
     stock_deliveries,
@@ -20,3 +21,4 @@ api_router.include_router(stock_deliveries.router)
 api_router.include_router(stock_counts.router)
 api_router.include_router(sales.router)
 api_router.include_router(dashboard.router)
+api_router.include_router(settings.router)

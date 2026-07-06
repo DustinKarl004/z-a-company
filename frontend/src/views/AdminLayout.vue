@@ -12,6 +12,7 @@ const navLinks = [
   { name: "admin-branches", label: "Branches" },
   { name: "admin-staff", label: "Staff" },
   { name: "admin-stock-items", label: "Stock Items" },
+  { name: "admin-settings", label: "Settings" },
 ];
 
 const menuOpen = ref(false);

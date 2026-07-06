@@ -1,7 +1,9 @@
+import json
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.security import hash_password
+from app.core.security import hash_password, verify_password
 from app.models.sale import Sale
 from app.models.stock_count import StockCount
 from app.models.stock_delivery import StockDelivery
@@ -55,6 +57,33 @@ def delete_user(db: Session, user: User) -> bool:
     db.delete(user)
     db.commit()
     return True
+
+
+def set_totp_secret(db: Session, user: User, secret: str | None) -> User:
+    user.totp_secret = secret
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def set_backup_codes(db: Session, user: User, codes: list[str] | None) -> User:
+    user.backup_codes = json.dumps([hash_password(code) for code in codes]) if codes else None
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def consume_backup_code(db: Session, user: User, code: str) -> bool:
+    if not user.backup_codes:
+        return False
+    hashes = json.loads(user.backup_codes)
+    for hashed in hashes:
+        if verify_password(code, hashed):
+            hashes.remove(hashed)
+            user.backup_codes = json.dumps(hashes)
+            db.commit()
+            return True
+    return False
 
 
 def list_staff(db: Session, *, branch_id: str | None = None) -> list[User]:

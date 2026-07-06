@@ -6,6 +6,8 @@ const props = defineProps({
   open: { type: Boolean, default: false },
   title: { type: String, default: "Delete this?" },
   message: { type: String, default: "This cannot be undone." },
+  confirmLabel: { type: String, default: "Delete" },
+  loadingLabel: { type: String, default: "Deleting..." },
   loading: { type: Boolean, default: false },
   error: { type: String, default: "" },
 });
@@ -79,7 +81,7 @@ function onCancel() {
       <div class="modal-actions">
         <button type="button" class="secondary" :disabled="loading" @click="onCancel">Cancel</button>
         <button type="button" class="danger" :disabled="loading || !password" @click="onConfirm">
-          {{ loading ? "Deleting..." : "Delete" }}
+          {{ loading ? loadingLabel : confirmLabel }}
         </button>
       </div>
     </div>

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import create_access_token, verify_password, verify_totp_code
-from app.crud.users import get_user_by_email
+from app.crud.users import consume_backup_code, get_user_by_email
 from app.schemas.auth import LoginRequest, TokenResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -20,7 +20,10 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse
         raise _INVALID_CREDENTIALS
 
     if user.totp_secret:
-        if not payload.totp_code or not verify_totp_code(user.totp_secret, payload.totp_code):
+        code_valid = bool(payload.totp_code) and verify_totp_code(user.totp_secret, payload.totp_code)
+        if not code_valid and payload.totp_code:
+            code_valid = consume_backup_code(db, user, payload.totp_code)
+        if not code_valid:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Valid authenticator code required",

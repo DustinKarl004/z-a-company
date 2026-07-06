@@ -1,3 +1,4 @@
+import secrets
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -35,3 +36,15 @@ def decode_access_token(token: str) -> dict:
 
 def verify_totp_code(secret: str, code: str) -> bool:
     return pyotp.TOTP(secret).verify(code)
+
+
+def generate_totp_secret() -> str:
+    return pyotp.random_base32()
+
+
+def build_totp_uri(secret: str, email: str) -> str:
+    return pyotp.totp.TOTP(secret).provisioning_uri(name=email, issuer_name="Z.A. Company")
+
+
+def generate_backup_codes(count: int = 10) -> list[str]:
+    return [f"{secrets.token_hex(2)}-{secrets.token_hex(2)}" for _ in range(count)]
