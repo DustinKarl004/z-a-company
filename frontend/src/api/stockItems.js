@@ -15,7 +15,3 @@ export function updateStockItem(id, { name, unit, price, category }) {
 export function deleteStockItem(id, password) {
   return apiFetch(`/stock-items/${id}`, { method: "DELETE", body: { password } });
 }
-
-export function deleteAllStockItems(password) {
-  return apiFetch("/stock-items", { method: "DELETE", body: { password } });
-}

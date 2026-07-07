@@ -6,6 +6,7 @@ import AdminDashboardView from "../views/AdminDashboardView.vue";
 import AdminBranchesView from "../views/AdminBranchesView.vue";
 import AdminStaffView from "../views/AdminStaffView.vue";
 import AdminStockItemsView from "../views/AdminStockItemsView.vue";
+import AdminExpensesView from "../views/AdminExpensesView.vue";
 import AdminSettingsView from "../views/AdminSettingsView.vue";
 import StaffLayout from "../views/StaffLayout.vue";
 import StaffDeliveriesView from "../views/StaffDeliveriesView.vue";
@@ -25,6 +26,7 @@ const routes = [
       { path: "branches", name: "admin-branches", component: AdminBranchesView },
       { path: "staff", name: "admin-staff", component: AdminStaffView },
       { path: "stock-items", name: "admin-stock-items", component: AdminStockItemsView },
+      { path: "expenses", name: "admin-expenses", component: AdminExpensesView },
       { path: "settings", name: "admin-settings", component: AdminSettingsView },
     ],
   },

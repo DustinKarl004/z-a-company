@@ -155,7 +155,7 @@ async function onSubmit() {
                 type="email"
                 maxlength="254"
                 autocomplete="email"
-                placeholder="you@za-company.com"
+                placeholder="Email address"
                 required
               />
             </div>

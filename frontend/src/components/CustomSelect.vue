@@ -7,6 +7,7 @@ const props = defineProps({
   placeholder: { type: String, default: "Select..." },
   id: { type: String, default: "" },
   creatable: { type: Boolean, default: false },
+  searchable: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(["update:modelValue", "create"]);
@@ -28,6 +29,10 @@ function optionLabel(option) {
   return option && typeof option === "object" ? option.label : option;
 }
 
+function optionGroup(option) {
+  return option && typeof option === "object" ? option.group : undefined;
+}
+
 const selectedIndex = computed(() => props.options.findIndex((o) => optionValue(o) === props.modelValue));
 
 const selectedLabel = computed(() => {
@@ -37,10 +42,17 @@ const selectedLabel = computed(() => {
 });
 
 const filteredOptions = computed(() => {
-  if (!props.creatable || !query.value.trim()) return props.options;
+  if (!(props.creatable || props.searchable) || !query.value.trim()) return props.options;
   const term = query.value.trim().toLowerCase();
   return props.options.filter((o) => optionLabel(o).toLowerCase().includes(term));
 });
+
+function showGroupHeader(idx) {
+  const opts = filteredOptions.value;
+  const g = optionGroup(opts[idx]);
+  if (g === undefined) return false;
+  return idx === 0 || optionGroup(opts[idx - 1]) !== g;
+}
 
 const canCreate = computed(() => {
   if (!props.creatable) return false;
@@ -76,7 +88,7 @@ async function toggle() {
   highlighted.value = selectedIndex.value;
   await nextTick();
   updatePosition();
-  if (props.creatable) searchRef.value?.focus();
+  if (props.creatable || props.searchable) searchRef.value?.focus();
 }
 
 function close() {
@@ -189,30 +201,31 @@ onBeforeUnmount(() => {
 
     <Teleport to="body">
       <div v-if="open" ref="dropdownRef" class="custom-select-dropdown" :style="dropdownStyle">
-        <div v-if="creatable" class="custom-select-search">
+        <div v-if="creatable || searchable" class="custom-select-search">
           <input
             ref="searchRef"
             v-model="query"
             type="text"
-            placeholder="Search or type to add"
+            :placeholder="creatable ? 'Search or type to add' : 'Search...'"
             @keydown="onSearchKeydown"
           />
         </div>
         <ul class="custom-select-options" role="listbox">
-          <li
-            v-for="(option, idx) in filteredOptions"
-            :key="optionValue(option)"
-            role="option"
-            class="custom-select-option"
-            :class="{ selected: optionValue(option) === modelValue, highlighted: idx === highlighted }"
-            @mousedown.prevent="choose(option)"
-            @mouseenter="highlighted = idx"
-          >
-            <span>{{ optionLabel(option) }}</span>
-            <svg v-if="optionValue(option) === modelValue" class="check" width="12" height="10" viewBox="0 0 12 10" fill="none">
-              <path d="M1 5L4.5 8.5L11 1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </li>
+          <template v-for="(option, idx) in filteredOptions" :key="optionValue(option)">
+            <li v-if="showGroupHeader(idx)" class="custom-select-group-header">{{ optionGroup(option) }}</li>
+            <li
+              role="option"
+              class="custom-select-option"
+              :class="{ selected: optionValue(option) === modelValue, highlighted: idx === highlighted }"
+              @mousedown.prevent="choose(option)"
+              @mouseenter="highlighted = idx"
+            >
+              <span>{{ optionLabel(option) }}</span>
+              <svg v-if="optionValue(option) === modelValue" class="check" width="12" height="10" viewBox="0 0 12 10" fill="none">
+                <path d="M1 5L4.5 8.5L11 1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </li>
+          </template>
           <li
             v-if="canCreate"
             class="custom-select-option custom-select-create"
@@ -345,6 +358,21 @@ onBeforeUnmount(() => {
 .custom-select-options::-webkit-scrollbar-thumb {
   background: var(--color-border);
   border-radius: 999px;
+}
+
+.custom-select-group-header {
+  padding: 0.5rem 0.65rem 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.custom-select-group-header:not(:first-child) {
+  margin-top: 0.25rem;
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.55rem;
 }
 
 .custom-select-option {

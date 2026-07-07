@@ -2,7 +2,6 @@
 import { computed, onMounted, ref, watch } from "vue";
 import {
   createStockItem,
-  deleteAllStockItems,
   deleteStockItem,
   listStockItems,
   updateStockItem,
@@ -51,9 +50,11 @@ const search = ref("");
 const unitFilter = ref("");
 const categoryFilter = ref("");
 
-const showDeleteAllModal = ref(false);
-const deleteAllError = ref("");
-const deletingAll = ref(false);
+const selectionMode = ref(false);
+const selectedIds = ref(new Set());
+const showDeleteSelectedModal = ref(false);
+const deleteSelectedError = ref("");
+const deletingSelected = ref(false);
 
 const pageSize = 12;
 const currentPage = ref(1);
@@ -292,26 +293,55 @@ async function confirmDelete(password) {
   }
 }
 
-function openDeleteAllModal() {
-  deleteAllError.value = "";
-  showDeleteAllModal.value = true;
+function toggleSelectionMode() {
+  selectionMode.value = !selectionMode.value;
+  selectedIds.value = new Set();
 }
 
-function cancelDeleteAll() {
-  showDeleteAllModal.value = false;
+function toggleSelectItem(id) {
+  const next = new Set(selectedIds.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  selectedIds.value = next;
 }
 
-async function confirmDeleteAll(password) {
-  deleteAllError.value = "";
-  deletingAll.value = true;
+function isSelected(id) {
+  return selectedIds.value.has(id);
+}
+
+function selectAllVisible() {
+  selectedIds.value = new Set(filteredItems.value.map((i) => i.id));
+}
+
+function clearSelection() {
+  selectedIds.value = new Set();
+}
+
+function openDeleteSelectedModal() {
+  deleteSelectedError.value = "";
+  showDeleteSelectedModal.value = true;
+}
+
+function cancelDeleteSelected() {
+  showDeleteSelectedModal.value = false;
+}
+
+async function confirmDeleteSelected(password) {
+  deleteSelectedError.value = "";
+  deletingSelected.value = true;
   try {
-    await deleteAllStockItems(password);
-    showDeleteAllModal.value = false;
+    for (const id of selectedIds.value) {
+      await deleteStockItem(id, password);
+    }
+    showDeleteSelectedModal.value = false;
+    selectionMode.value = false;
+    selectedIds.value = new Set();
     await refresh();
   } catch (e) {
-    deleteAllError.value = e instanceof ApiError ? e.detail || "Could not delete all items" : "Could not delete all items";
+    deleteSelectedError.value =
+      e instanceof ApiError ? e.detail || "Could not delete selected items" : "Could not delete selected items";
   } finally {
-    deletingAll.value = false;
+    deletingSelected.value = false;
   }
 }
 
@@ -330,12 +360,29 @@ onMounted(refresh);
         <button
           v-if="items.length"
           type="button"
-          class="secondary danger btn-icon"
-          @click="openDeleteAllModal"
+          class="secondary btn-icon"
+          :class="{ active: selectionMode }"
+          @click="toggleSelectionMode"
         >
-          <Icon name="trash" :size="16" /> Delete all
+          <Icon name="check" :size="16" /> {{ selectionMode ? "Cancel select" : "Select" }}
         </button>
         <button type="button" class="btn-icon" @click="openAddModal"><Icon name="plus" :size="16" /> Add item</button>
+      </div>
+    </div>
+
+    <div v-if="selectionMode" class="selection-bar">
+      <span class="selection-count">{{ selectedIds.size }} selected</span>
+      <div class="selection-actions">
+        <button type="button" class="secondary" @click="selectAllVisible">Select all</button>
+        <button type="button" class="secondary" :disabled="!selectedIds.size" @click="clearSelection">Clear</button>
+        <button
+          type="button"
+          class="secondary danger btn-icon"
+          :disabled="!selectedIds.size"
+          @click="openDeleteSelectedModal"
+        >
+          <Icon name="trash" :size="14" /> Delete selected ({{ selectedIds.size }})
+        </button>
       </div>
     </div>
 
@@ -429,15 +476,15 @@ onMounted(refresh);
     />
 
     <ConfirmDeleteModal
-      :open="showDeleteAllModal"
-      title="Delete all stock items?"
-      message="This will permanently delete every stock item, along with all sales, delivery, and count records tied to them. This cannot be undone."
-      confirm-label="Delete all"
-      loading-label="Deleting all..."
-      :loading="deletingAll"
-      :error="deleteAllError"
-      @confirm="confirmDeleteAll"
-      @cancel="cancelDeleteAll"
+      :open="showDeleteSelectedModal"
+      :title="`Delete ${selectedIds.size} selected ${selectedIds.size === 1 ? 'item' : 'items'}?`"
+      message="This will permanently delete the selected stock items, along with all sales, delivery, and count records tied to them. This cannot be undone."
+      confirm-label="Delete selected"
+      loading-label="Deleting..."
+      :loading="deletingSelected"
+      :error="deleteSelectedError"
+      @confirm="confirmDeleteSelected"
+      @cancel="cancelDeleteSelected"
     />
 
     <div class="card filters-card">
@@ -492,14 +539,23 @@ onMounted(refresh);
 
     <template v-else>
       <div class="item-grid">
-        <div v-for="i in pagedItems" :key="i.id" class="item-card">
+        <div
+          v-for="i in pagedItems"
+          :key="i.id"
+          class="item-card"
+          :class="{ selectable: selectionMode, selected: selectionMode && isSelected(i.id) }"
+          @click="selectionMode && toggleSelectItem(i.id)"
+        >
           <div class="item-card-top">
+            <label v-if="selectionMode" class="item-checkbox" @click.stop>
+              <input type="checkbox" :checked="isSelected(i.id)" @change="toggleSelectItem(i.id)" />
+            </label>
             <div class="item-card-name">{{ i.name }}</div>
             <span class="unit-chip">{{ i.unit }}</span>
           </div>
           <span v-if="i.category" class="category-chip">{{ i.category }}</span>
           <div class="item-card-price">₱{{ i.price.toFixed(2) }}</div>
-          <div class="item-card-actions">
+          <div v-if="!selectionMode" class="item-card-actions">
             <button type="button" class="secondary edit btn-icon" @click="startEdit(i)"><Icon name="edit" :size="14" /> Edit</button>
             <button
               type="button"
@@ -648,6 +704,58 @@ onMounted(refresh);
 
 .card {
   margin-bottom: 1.5rem;
+}
+
+.header-actions .secondary.active {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.selection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.selection-count {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.selection-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.item-checkbox {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.item-checkbox input {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.item-card.selectable {
+  cursor: pointer;
+}
+
+.item-card.selected {
+  box-shadow: 0 0 0 2px var(--color-primary);
 }
 
 .unit-picker {
