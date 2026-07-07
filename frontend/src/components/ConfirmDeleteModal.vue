@@ -79,7 +79,7 @@ function onCancel() {
       <p v-if="error" class="error-message">{{ error }}</p>
 
       <div class="modal-actions">
-        <button type="button" class="secondary" :disabled="loading" @click="onCancel">Cancel</button>
+        <button type="button" class="secondary cancel" :disabled="loading" @click="onCancel">Cancel</button>
         <button type="button" class="danger" :disabled="loading || !password" @click="onConfirm">
           {{ loading ? loadingLabel : confirmLabel }}
         </button>
@@ -144,6 +144,10 @@ function onCancel() {
 
 .modal-actions button {
   min-width: 100px;
+}
+
+.cancel {
+  border-color: #fff;
 }
 
 .danger {

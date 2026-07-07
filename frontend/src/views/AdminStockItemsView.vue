@@ -1,9 +1,11 @@
 <script setup>
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { createStockItem, deleteStockItem, listStockItems, updateStockItem } from "../api/stockItems";
 import { ApiError } from "../api/client";
 import ConfirmDeleteModal from "../components/ConfirmDeleteModal.vue";
+import CustomSelect from "../components/CustomSelect.vue";
 import Modal from "../components/Modal.vue";
+import Icon from "../components/Icon.vue";
 
 const unitOptions = ref(["kg", "g", "L", "mL", "pcs", "servings", "pack", "box", "sack", "bottle"]);
 
@@ -27,6 +29,52 @@ const deleting = ref(false);
 
 const addingUnit = ref(false);
 const newUnit = ref("");
+
+const search = ref("");
+const unitFilter = ref("");
+
+const pageSize = 12;
+const currentPage = ref(1);
+
+const hasActiveFilters = computed(() => !!(search.value.trim() || unitFilter.value));
+
+function clearFilters() {
+  search.value = "";
+  unitFilter.value = "";
+}
+
+const filteredItems = computed(() => {
+  const term = search.value.trim().toLowerCase();
+  return items.value.filter((i) => {
+    if (term && !i.name.toLowerCase().includes(term)) return false;
+    if (unitFilter.value && i.unit !== unitFilter.value) return false;
+    return true;
+  });
+});
+
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredItems.value.length / pageSize)));
+
+const pagedItems = computed(() => {
+  const start = (currentPage.value - 1) * pageSize;
+  return filteredItems.value.slice(start, start + pageSize);
+});
+
+watch(totalPages, (total) => {
+  if (currentPage.value > total) currentPage.value = total;
+});
+
+watch([search, unitFilter], () => {
+  currentPage.value = 1;
+});
+
+function goToPage(page) {
+  currentPage.value = Math.min(Math.max(page, 1), totalPages.value);
+}
+
+const unitFilterOptions = computed(() => [
+  { label: "All units", value: "" },
+  ...unitOptions.value.map((u) => ({ label: u, value: u })),
+]);
 
 function startAddUnit() {
   addingUnit.value = true;
@@ -177,8 +225,8 @@ onMounted(refresh);
         <p class="page-subtitle">The catalog of items staff can log deliveries, counts, and sales against.</p>
       </div>
       <div class="header-actions">
-        <span class="count-chip">{{ items.length }} {{ items.length === 1 ? "item" : "items" }}</span>
-        <button type="button" @click="openAddModal">+ Add item</button>
+        <span class="count-chip"><Icon name="count" :size="14" /> {{ items.length }} {{ items.length === 1 ? "item" : "items" }}</span>
+        <button type="button" class="btn-icon" @click="openAddModal"><Icon name="plus" :size="16" /> Add item</button>
       </div>
     </div>
 
@@ -222,7 +270,7 @@ onMounted(refresh);
         </div>
         <p v-if="error" class="error-message">{{ error }}</p>
         <div class="modal-actions">
-          <button type="button" class="secondary" :disabled="submitting" @click="closeAddModal">Cancel</button>
+          <button type="button" class="secondary cancel" :disabled="submitting" @click="closeAddModal">Cancel</button>
           <button
             type="submit"
             :disabled="submitting || !form.unit"
@@ -244,36 +292,83 @@ onMounted(refresh);
       @cancel="cancelDelete"
     />
 
+    <div class="card filters-card">
+      <div class="filters-head">
+        <span class="filters-title"><Icon name="filter" :size="14" /> Filters</span>
+        <button v-if="hasActiveFilters" type="button" class="clear-filters" @click="clearFilters">
+          <Icon name="x" :size="12" /> Clear filters
+        </button>
+      </div>
+      <div class="filters-grid">
+        <div class="field search-field">
+          <label for="item-search">Search</label>
+          <div class="search-input">
+            <Icon name="search" :size="15" class="search-icon" />
+            <input id="item-search" v-model="search" placeholder="Search by item name" />
+            <button v-if="search" type="button" class="search-clear" aria-label="Clear search" @click="search = ''">
+              <Icon name="x" :size="13" />
+            </button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="item-unit-filter">Unit</label>
+          <CustomSelect id="item-unit-filter" v-model="unitFilter" :options="unitFilterOptions" placeholder="All units" />
+        </div>
+      </div>
+    </div>
+
     <p v-if="deleteError" class="error-message top-error">{{ deleteError }}</p>
 
     <p v-if="loading" class="state-message">Loading items...</p>
-    <div v-else-if="!items.length" class="card state-card">
+    <div v-else-if="!filteredItems.length" class="card state-card">
       <div class="empty-state">
-        <p>No stock items yet.</p>
-        <p class="empty-hint">Add your first item above so staff can start logging against it.</p>
+        <template v-if="items.length">
+          <p>No items match your filters.</p>
+          <p class="empty-hint">Try clearing the search or filters above.</p>
+        </template>
+        <template v-else>
+          <p>No stock items yet.</p>
+          <p class="empty-hint">Add your first item above so staff can start logging against it.</p>
+        </template>
       </div>
     </div>
 
-    <div v-else class="item-grid">
-      <div v-for="i in items" :key="i.id" class="item-card">
-        <div class="item-card-top">
-          <div class="item-card-name">{{ i.name }}</div>
-          <span class="unit-chip">{{ i.unit }}</span>
-        </div>
-        <div class="item-card-price">₱{{ i.price.toFixed(2) }}</div>
-        <div class="item-card-actions">
-          <button type="button" class="secondary" @click="startEdit(i)">Edit</button>
-          <button
-            type="button"
-            class="secondary danger"
-            :disabled="deletingId === i.id"
-            @click="onDelete(i)"
-          >
-            {{ deletingId === i.id ? "Deleting..." : "Delete" }}
-          </button>
+    <template v-else>
+      <div class="item-grid">
+        <div v-for="i in pagedItems" :key="i.id" class="item-card">
+          <div class="item-card-top">
+            <div class="item-card-name">{{ i.name }}</div>
+            <span class="unit-chip">{{ i.unit }}</span>
+          </div>
+          <div class="item-card-price">₱{{ i.price.toFixed(2) }}</div>
+          <div class="item-card-actions">
+            <button type="button" class="secondary edit btn-icon" @click="startEdit(i)"><Icon name="edit" :size="14" /> Edit</button>
+            <button
+              type="button"
+              class="secondary danger btn-icon"
+              :disabled="deletingId === i.id"
+              @click="onDelete(i)"
+            >
+              <Icon name="trash" :size="14" /> {{ deletingId === i.id ? "Deleting..." : "Delete" }}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+
+      <div v-if="totalPages > 1" class="pagination">
+        <button class="secondary" :disabled="currentPage === 1" @click="goToPage(currentPage - 1)">Prev</button>
+        <button
+          v-for="page in totalPages"
+          :key="page"
+          class="page-btn"
+          :class="{ active: page === currentPage }"
+          @click="goToPage(page)"
+        >
+          {{ page }}
+        </button>
+        <button class="secondary" :disabled="currentPage === totalPages" @click="goToPage(currentPage + 1)">Next</button>
+      </div>
+    </template>
 
     <Modal v-if="editingId" title="Edit item" @close="cancelEdit">
       <form @submit.prevent="saveEdit">
@@ -315,7 +410,7 @@ onMounted(refresh);
         </div>
         <p v-if="editError" class="error-message">{{ editError }}</p>
         <div class="modal-actions">
-          <button type="button" class="secondary" :disabled="savingEdit" @click="cancelEdit">Cancel</button>
+          <button type="button" class="secondary cancel" :disabled="savingEdit" @click="cancelEdit">Cancel</button>
           <button
             type="submit"
             :disabled="savingEdit || !editingName.trim() || !editingUnit"
@@ -394,7 +489,7 @@ onMounted(refresh);
 }
 
 .unit-pill.active {
-  background: var(--color-primary);
+  background: var(--gradient-primary);
   border-color: var(--color-primary);
   color: #fff;
 }
@@ -485,6 +580,124 @@ onMounted(refresh);
   margin-top: 0.35rem;
 }
 
+.filters-card {
+  padding: 1.1rem 1.25rem 1.25rem;
+}
+
+.filters-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+
+.filters-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.clear-filters {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.clear-filters:hover {
+  color: var(--color-primary-hover);
+  background: none;
+}
+
+.filters-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: end;
+}
+
+.filters-grid .field {
+  flex: 0 1 220px;
+  margin-bottom: 0;
+}
+
+.search-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-icon {
+  position: absolute;
+  left: 0.65rem;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.search-input input {
+  width: 100%;
+  padding-left: 2.1rem;
+  padding-right: 2.1rem;
+}
+
+.search-clear {
+  position: absolute;
+  right: 0.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: 50%;
+}
+
+.search-clear:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  margin-top: 1.5rem;
+}
+
+.page-btn {
+  min-width: 34px;
+  height: 34px;
+  padding: 0 0.5rem;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.page-btn:hover {
+  background: var(--color-bg);
+}
+
+.page-btn.active {
+  background: var(--gradient-primary);
+  color: #fff;
+}
+
 .top-error {
   margin: -0.75rem 0 1.25rem;
 }
@@ -502,13 +715,15 @@ onMounted(refresh);
   background: var(--color-surface);
   border-radius: var(--radius);
   border-top: 3px solid var(--color-primary);
+  border-image: var(--gradient-primary) 1;
   box-shadow: var(--shadow);
   padding: 1.25rem;
-  transition: transform 0.15s ease;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .item-card:hover {
   transform: translateY(-2px);
+  box-shadow: var(--shadow-hover);
 }
 
 .item-card-top {
@@ -555,6 +770,14 @@ onMounted(refresh);
   padding: 0.45rem 0.6rem;
 }
 
+.item-card-actions .edit {
+  border-color: #fff;
+}
+
+.cancel {
+  border-color: #fff;
+}
+
 .item-card-actions .danger {
   color: var(--color-danger);
   border-color: var(--color-danger);
@@ -577,6 +800,10 @@ onMounted(refresh);
   .item-grid {
     grid-template-columns: 1fr 1fr;
     gap: 0.75rem;
+  }
+
+  .filters-grid .field {
+    flex-basis: 100%;
   }
 }
 

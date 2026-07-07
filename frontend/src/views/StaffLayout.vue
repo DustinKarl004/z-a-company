@@ -8,10 +8,18 @@ const router = useRouter();
 const route = useRoute();
 
 const navLinks = [
-  { name: "staff-deliveries", label: "Deliveries" },
-  { name: "staff-stock-count", label: "Stock Count" },
-  { name: "staff-sales", label: "Sales" },
+  { name: "staff-deliveries", label: "Deliveries", icon: "deliveries" },
+  { name: "staff-stock-count", label: "Stock Count", icon: "count" },
+  { name: "staff-sales", label: "Sales", icon: "sales" },
 ];
+
+const icons = {
+  deliveries:
+    '<rect x="1" y="3" width="15" height="13" rx="1.5"/><path d="M16 8h4l3 3v5h-7V8Z"/><circle cx="5.5" cy="18.5" r="2"/><circle cx="18.5" cy="18.5" r="2"/>',
+  count:
+    '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+  sales: '<path d="M3 3v18h18"/><path d="M18.7 8 12 14.7l-4-4L3 15"/>',
+};
 
 const menuOpen = ref(false);
 
@@ -62,7 +70,10 @@ function onLogout() {
       <div class="sidebar-header">
         <div class="brand">
           <img src="/logo.png" alt="" class="brand-logo" />
-          <span>Z.A. Company</span>
+          <div class="brand-text">
+            <span class="brand-name">Z.A. Company</span>
+            <span class="brand-subtitle">Staff Portal</span>
+          </div>
         </div>
 
         <button
@@ -78,7 +89,7 @@ function onLogout() {
         </button>
       </div>
 
-      <nav>
+      <nav class="nav-group">
         <button
           v-for="link in navLinks"
           :key="link.name"
@@ -87,7 +98,8 @@ function onLogout() {
           :class="{ 'nav-link-active': route.name === link.name }"
           @click="goTo(link.name)"
         >
-          {{ link.label }}
+          <svg class="nav-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-html="icons[link.icon]"></svg>
+          <span>{{ link.label }}</span>
         </button>
       </nav>
 
@@ -109,22 +121,25 @@ function onLogout() {
 
 <style scoped>
 .admin-shell {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
+  overflow: hidden;
 }
 
 .admin-sidebar {
-  width: 240px;
+  width: 250px;
   flex-shrink: 0;
-  background: var(--color-primary-dark);
-  border-right: 3px solid var(--color-accent);
+  background: var(--glass-bg);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-right: 1px solid rgba(255, 84, 112, 0.2);
+  box-shadow: 4px 0 30px rgba(0, 0, 0, 0.35), inset -1px 0 0 rgba(255, 255, 255, 0.03);
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
-  padding: 1.5rem 1.25rem;
-  position: sticky;
-  top: 0;
+  gap: 1.25rem;
+  padding: 1.5rem 1.1rem;
   height: 100vh;
+  overflow-y: auto;
 }
 
 .sidebar-header {
@@ -132,20 +147,41 @@ function onLogout() {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  padding-bottom: 1.1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  font-weight: 700;
+  gap: 0.7rem;
   color: #fff;
   letter-spacing: 0.01em;
 }
 
 .brand-logo {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.brand-name {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.brand-subtitle {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--color-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .mobile-topbar {
@@ -160,27 +196,35 @@ function onLogout() {
   display: none;
 }
 
-.admin-sidebar nav {
+.admin-sidebar .nav-group {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.25rem;
 }
 
 .admin-sidebar .nav-link {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   width: 100%;
   text-align: left;
   background: none;
   border: none;
+  border-left: 3px solid transparent;
   color: rgba(255, 255, 255, 0.75);
   text-decoration: none;
-  padding: 0.6rem 0.9rem;
+  padding: 0.6rem 0.75rem;
   border-radius: 8px;
   font-size: 0.92rem;
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.nav-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
 }
 
 .admin-sidebar .nav-link:hover {
@@ -190,9 +234,16 @@ function onLogout() {
 
 .admin-sidebar .nav-link-active,
 .admin-sidebar .nav-link-active:hover {
-  color: var(--color-primary-dark);
-  background: var(--color-accent);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  border-left-color: var(--color-accent);
+  box-shadow: inset 0 0 20px rgba(255, 45, 77, 0.12);
   font-weight: 600;
+}
+
+.admin-sidebar .nav-link-active .nav-icon {
+  opacity: 1;
+  color: var(--color-accent);
 }
 
 .logout-btn {
@@ -220,11 +271,24 @@ function onLogout() {
   max-width: 1100px;
   margin: 0 auto;
   width: 100%;
+  height: 100vh;
+  overflow-y: auto;
 }
 
 @media (max-width: 720px) {
   .admin-shell {
     flex-direction: column;
+    height: auto;
+    overflow: visible;
+  }
+
+  .admin-sidebar {
+    height: 100vh;
+  }
+
+  .admin-content {
+    height: auto;
+    overflow-y: visible;
   }
 
   .mobile-topbar {
@@ -234,8 +298,11 @@ function onLogout() {
     gap: 1rem;
     position: sticky;
     top: 0;
-    background: var(--color-primary-dark);
-    border-bottom: 3px solid var(--color-accent);
+    background: var(--glass-bg);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border-bottom: 1px solid rgba(255, 84, 112, 0.2);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
     padding: 0.85rem 1rem;
     z-index: 50;
     transform: translateZ(0);

@@ -36,6 +36,8 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -51,7 +53,8 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKeydown));
   background: var(--color-surface);
   border-radius: var(--radius);
   border-top: 3px solid var(--color-primary);
-  box-shadow: var(--shadow);
+  border-image: var(--gradient-primary) 1;
+  box-shadow: var(--shadow-hover);
 }
 
 .modal-header {

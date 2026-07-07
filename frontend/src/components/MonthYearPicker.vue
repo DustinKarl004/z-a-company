@@ -204,7 +204,7 @@ onBeforeUnmount(() => document.removeEventListener("mousedown", onClickOutside))
 }
 
 .picker-month.selected {
-  background: var(--color-primary);
+  background: var(--gradient-primary);
   color: #fff;
 }
 </style>

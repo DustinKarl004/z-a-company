@@ -4,6 +4,7 @@ import { createBranch, deleteBranch, listBranches, updateBranch } from "../api/b
 import { ApiError } from "../api/client";
 import Modal from "../components/Modal.vue";
 import ConfirmDeleteModal from "../components/ConfirmDeleteModal.vue";
+import Icon from "../components/Icon.vue";
 
 const branches = ref([]);
 const name = ref("");
@@ -128,8 +129,8 @@ onMounted(refresh);
         <p class="page-subtitle">Every branch that can have its own staff and daily records.</p>
       </div>
       <div class="header-actions">
-        <span class="count-chip">{{ branches.length }} {{ branches.length === 1 ? "branch" : "branches" }}</span>
-        <button type="button" @click="openAddModal">+ Add branch</button>
+        <span class="count-chip"><Icon name="count" :size="14" /> {{ branches.length }} {{ branches.length === 1 ? "branch" : "branches" }}</span>
+        <button type="button" class="btn-icon" @click="openAddModal"><Icon name="plus" :size="16" /> Add branch</button>
       </div>
     </div>
 
@@ -141,7 +142,7 @@ onMounted(refresh);
         </div>
         <p v-if="error" class="error-message">{{ error }}</p>
         <div class="modal-actions">
-          <button type="button" class="secondary" :disabled="submitting" @click="closeAddModal">Cancel</button>
+          <button type="button" class="secondary cancel" :disabled="submitting" @click="closeAddModal">Cancel</button>
           <button type="submit" :disabled="submitting">{{ submitting ? "Adding..." : "Add branch" }}</button>
         </div>
       </form>
@@ -179,7 +180,7 @@ onMounted(refresh);
             <p v-if="editError" class="error-message">{{ editError }}</p>
           </div>
           <div class="branch-card-actions">
-            <button class="secondary" :disabled="savingEdit" @click="cancelEdit">Cancel</button>
+            <button class="secondary cancel" :disabled="savingEdit" @click="cancelEdit">Cancel</button>
             <button :disabled="savingEdit || !editName.trim()" @click="saveEdit(b)">
               {{ savingEdit ? "Saving..." : "Save" }}
             </button>
@@ -192,13 +193,13 @@ onMounted(refresh);
             <div class="branch-card-meta">Added {{ new Date(b.created_at).toLocaleDateString() }}</div>
           </div>
           <div class="branch-card-actions">
-            <button class="secondary" @click="startEdit(b)">Edit</button>
+            <button class="secondary edit btn-icon" @click="startEdit(b)"><Icon name="edit" :size="14" /> Edit</button>
             <button
-              class="secondary danger"
+              class="secondary danger btn-icon"
               :disabled="deletingId === b.id"
               @click="onDelete(b)"
             >
-              {{ deletingId === b.id ? "Deleting..." : "Delete" }}
+              <Icon name="trash" :size="14" /> {{ deletingId === b.id ? "Deleting..." : "Delete" }}
             </button>
           </div>
         </template>
@@ -300,20 +301,22 @@ onMounted(refresh);
   background: var(--color-surface);
   border-radius: var(--radius);
   border-top: 3px solid var(--color-primary);
+  border-image: var(--gradient-primary) 1;
   box-shadow: var(--shadow);
   padding: 1.5rem 1.25rem;
-  transition: transform 0.15s ease;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .branch-card:hover {
   transform: translateY(-2px);
+  box-shadow: var(--shadow-hover);
 }
 
 .branch-card-icon {
   width: 52px;
   height: 52px;
   border-radius: 50%;
-  background: var(--color-primary);
+  background: var(--gradient-primary);
   color: #fff;
   display: flex;
   align-items: center;
@@ -350,6 +353,14 @@ onMounted(refresh);
   flex: 1;
   font-size: 0.85rem;
   padding: 0.45rem 0.6rem;
+}
+
+.branch-card-actions .edit {
+  border-color: #fff;
+}
+
+.cancel {
+  border-color: #fff;
 }
 
 .branch-card-actions .danger {

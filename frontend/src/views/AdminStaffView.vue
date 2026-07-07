@@ -7,6 +7,8 @@ import CustomSelect from "../components/CustomSelect.vue";
 import ConfirmDeleteModal from "../components/ConfirmDeleteModal.vue";
 import ConfirmModal from "../components/ConfirmModal.vue";
 import Modal from "../components/Modal.vue";
+import Icon from "../components/Icon.vue";
+
 
 const staff = ref([]);
 const branches = ref([]);
@@ -43,6 +45,14 @@ const currentPage = ref(1);
 
 const activeCount = computed(() => staff.value.filter((s) => s.is_active).length);
 const inactiveCount = computed(() => staff.value.length - activeCount.value);
+
+const hasActiveFilters = computed(() => !!(search.value.trim() || branchFilter.value || statusFilter.value));
+
+function clearFilters() {
+  search.value = "";
+  branchFilter.value = "";
+  statusFilter.value = "";
+}
 
 const filteredStaff = computed(() => {
   const term = search.value.trim().toLowerCase();
@@ -186,8 +196,8 @@ onMounted(refresh);
         <p class="page-subtitle">Staff accounts, scoped to a single branch each.</p>
       </div>
       <div class="header-actions">
-        <span class="count-chip">{{ staff.length }} {{ staff.length === 1 ? "member" : "members" }}</span>
-        <button type="button" @click="openAddModal">+ Add staff</button>
+        <span class="count-chip"><Icon name="count" :size="14" /> {{ staff.length }} {{ staff.length === 1 ? "member" : "members" }}</span>
+        <button type="button" class="btn-icon" @click="openAddModal"><Icon name="plus" :size="16" /> Add staff</button>
       </div>
     </div>
 
@@ -232,24 +242,38 @@ onMounted(refresh);
         </div>
         <p v-if="error" class="error-message">{{ error }}</p>
         <div class="modal-actions">
-          <button type="button" class="secondary" :disabled="submitting" @click="closeAddModal">Cancel</button>
+          <button type="button" class="secondary cancel" :disabled="submitting" @click="closeAddModal">Cancel</button>
           <button type="submit" :disabled="submitting">{{ submitting ? "Adding..." : "Add staff" }}</button>
         </div>
       </form>
     </Modal>
 
     <div class="card filters-card">
-      <div class="field search-field">
-        <label for="staff-search">Search</label>
-        <input id="staff-search" v-model="search" placeholder="Search by name or email" />
+      <div class="filters-head">
+        <span class="filters-title"><Icon name="filter" :size="14" /> Filters</span>
+        <button v-if="hasActiveFilters" type="button" class="clear-filters" @click="clearFilters">
+          <Icon name="x" :size="12" /> Clear filters
+        </button>
       </div>
-      <div class="field">
-        <label for="staff-branch-filter">Branch</label>
-        <CustomSelect id="staff-branch-filter" v-model="branchFilter" :options="branchFilterOptions" placeholder="All branches" />
-      </div>
-      <div class="field">
-        <label for="staff-status-filter">Status</label>
-        <CustomSelect id="staff-status-filter" v-model="statusFilter" :options="statusOptions" placeholder="All statuses" />
+      <div class="filters-grid">
+        <div class="field search-field">
+          <label for="staff-search">Search</label>
+          <div class="search-input">
+            <Icon name="search" :size="15" class="search-icon" />
+            <input id="staff-search" v-model="search" placeholder="Search by name or email" />
+            <button v-if="search" type="button" class="search-clear" aria-label="Clear search" @click="search = ''">
+              <Icon name="x" :size="13" />
+            </button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="staff-branch-filter">Branch</label>
+          <CustomSelect id="staff-branch-filter" v-model="branchFilter" :options="branchFilterOptions" placeholder="All branches" />
+        </div>
+        <div class="field">
+          <label for="staff-status-filter">Status</label>
+          <CustomSelect id="staff-status-filter" v-model="statusFilter" :options="statusOptions" placeholder="All statuses" />
+        </div>
       </div>
     </div>
 
@@ -324,11 +348,11 @@ onMounted(refresh);
             </button>
             <button
               v-if="!s.is_active"
-              class="secondary danger"
+              class="secondary danger btn-icon"
               :disabled="deletingId === s.id"
               @click="onDelete(s)"
             >
-              {{ deletingId === s.id ? "Deleting..." : "Delete" }}
+              <Icon name="trash" :size="14" /> {{ deletingId === s.id ? "Deleting..." : "Delete" }}
             </button>
           </div>
         </div>
@@ -435,6 +459,10 @@ onMounted(refresh);
   margin-bottom: 1.5rem;
 }
 
+.cancel {
+  border-color: #fff;
+}
+
 .card-title {
   font-size: 1.05rem;
   margin-bottom: 1rem;
@@ -455,14 +483,92 @@ onMounted(refresh);
 }
 
 .filters-card {
+  padding: 1.1rem 1.25rem 1.25rem;
+}
+
+.filters-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+
+.filters-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.clear-filters {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.clear-filters:hover {
+  color: var(--color-primary-hover);
+  background: none;
+}
+
+.filters-grid {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr;
+  grid-template-columns: minmax(220px, 2fr) 1fr 1fr;
   gap: 1rem;
   align-items: end;
 }
 
-.filters-card .field {
+.filters-grid .field {
   margin-bottom: 0;
+}
+
+.search-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-icon {
+  position: absolute;
+  left: 0.65rem;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.search-input input {
+  width: 100%;
+  padding-left: 2.1rem;
+  padding-right: 2.1rem;
+}
+
+.search-clear {
+  position: absolute;
+  right: 0.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: 50%;
+}
+
+.search-clear:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
 }
 
 .top-error {
@@ -509,13 +615,15 @@ onMounted(refresh);
   background: var(--color-surface);
   border-radius: var(--radius);
   border-top: 3px solid var(--color-primary);
+  border-image: var(--gradient-primary) 1;
   box-shadow: var(--shadow);
   padding: 1.25rem;
-  transition: transform 0.15s ease;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .staff-card:hover {
   transform: translateY(-2px);
+  box-shadow: var(--shadow-hover);
 }
 
 .staff-card-top {
@@ -529,7 +637,7 @@ onMounted(refresh);
   width: 42px;
   height: 42px;
   border-radius: 50%;
-  background: var(--color-primary);
+  background: var(--gradient-primary);
   color: #fff;
   display: flex;
   align-items: center;
@@ -635,19 +743,32 @@ onMounted(refresh);
 }
 
 .page-btn.active {
-  background: var(--color-primary);
+  background: var(--gradient-primary);
   color: #fff;
 }
 
 @media (max-width: 900px) {
-  .filters-card {
-    grid-template-columns: 1fr;
+  .filters-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .search-field {
+    grid-column: 1 / -1;
   }
 }
 
 @media (max-width: 640px) {
   .new-staff-grid {
     grid-template-columns: 1fr;
+  }
+
+  .filters-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .filters-head {
+    flex-wrap: wrap;
+    gap: 0.5rem;
   }
 
   .stat-item {
