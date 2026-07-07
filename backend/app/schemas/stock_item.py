@@ -7,12 +7,14 @@ class StockItemCreate(BaseModel):
     name: str
     unit: str
     price: float
+    category: str | None = None
 
 
 class StockItemUpdate(BaseModel):
     name: str
     unit: str
     price: float
+    category: str | None = None
 
 
 class StockItemOut(BaseModel):
@@ -22,4 +24,5 @@ class StockItemOut(BaseModel):
     name: str
     unit: str
     price: float
+    category: str | None = None
     created_at: datetime

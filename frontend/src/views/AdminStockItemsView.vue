@@ -1,6 +1,12 @@
 <script setup>
 import { computed, onMounted, ref, watch } from "vue";
-import { createStockItem, deleteStockItem, listStockItems, updateStockItem } from "../api/stockItems";
+import {
+  createStockItem,
+  deleteAllStockItems,
+  deleteStockItem,
+  listStockItems,
+  updateStockItem,
+} from "../api/stockItems";
 import { ApiError } from "../api/client";
 import ConfirmDeleteModal from "../components/ConfirmDeleteModal.vue";
 import CustomSelect from "../components/CustomSelect.vue";
@@ -8,9 +14,17 @@ import Modal from "../components/Modal.vue";
 import Icon from "../components/Icon.vue";
 
 const unitOptions = ref(["kg", "g", "L", "mL", "pcs", "servings", "pack", "box", "sack", "bottle"]);
+const categoryOptions = ref([
+  "Meats",
+  "Side Dishes / Banchan",
+  "Rice & Staples",
+  "Sauces & Condiments",
+  "Drinks",
+  "Consumables/Supplies",
+]);
 
 const items = ref([]);
-const form = ref({ name: "", unit: "", price: "" });
+const form = ref({ name: "", unit: "", price: "", category: "" });
 const error = ref("");
 const submitting = ref(false);
 const loading = ref(true);
@@ -19,6 +33,7 @@ const editingId = ref(null);
 const editingName = ref("");
 const editingUnit = ref("");
 const editingPrice = ref("");
+const editingCategory = ref("");
 const editError = ref("");
 const savingEdit = ref(false);
 const deletingId = ref(null);
@@ -29,27 +44,49 @@ const deleting = ref(false);
 
 const addingUnit = ref(false);
 const newUnit = ref("");
+const addingCategory = ref(false);
+const newCategory = ref("");
 
 const search = ref("");
 const unitFilter = ref("");
+const categoryFilter = ref("");
+
+const showDeleteAllModal = ref(false);
+const deleteAllError = ref("");
+const deletingAll = ref(false);
 
 const pageSize = 12;
 const currentPage = ref(1);
 
-const hasActiveFilters = computed(() => !!(search.value.trim() || unitFilter.value));
+const hasActiveFilters = computed(() => !!(search.value.trim() || unitFilter.value || categoryFilter.value));
 
 function clearFilters() {
   search.value = "";
   unitFilter.value = "";
+  categoryFilter.value = "";
+}
+
+function categoryRank(category) {
+  if (!category) return categoryOptions.value.length;
+  const index = categoryOptions.value.findIndex((c) => c.toLowerCase() === category.toLowerCase());
+  return index === -1 ? categoryOptions.value.length : index;
 }
 
 const filteredItems = computed(() => {
   const term = search.value.trim().toLowerCase();
-  return items.value.filter((i) => {
-    if (term && !i.name.toLowerCase().includes(term)) return false;
-    if (unitFilter.value && i.unit !== unitFilter.value) return false;
-    return true;
-  });
+  return items.value
+    .filter((i) => {
+      if (term && !i.name.toLowerCase().includes(term)) return false;
+      if (unitFilter.value && i.unit !== unitFilter.value) return false;
+      if (categoryFilter.value && i.category !== categoryFilter.value) return false;
+      return true;
+    })
+    .slice()
+    .sort((a, b) => {
+      const rankDiff = categoryRank(a.category) - categoryRank(b.category);
+      if (rankDiff !== 0) return rankDiff;
+      return a.name.localeCompare(b.name);
+    });
 });
 
 const totalPages = computed(() => Math.max(1, Math.ceil(filteredItems.value.length / pageSize)));
@@ -63,7 +100,7 @@ watch(totalPages, (total) => {
   if (currentPage.value > total) currentPage.value = total;
 });
 
-watch([search, unitFilter], () => {
+watch([search, unitFilter, categoryFilter], () => {
   currentPage.value = 1;
 });
 
@@ -74,6 +111,11 @@ function goToPage(page) {
 const unitFilterOptions = computed(() => [
   { label: "All units", value: "" },
   ...unitOptions.value.map((u) => ({ label: u, value: u })),
+]);
+
+const categoryFilterOptions = computed(() => [
+  { label: "All categories", value: "" },
+  ...categoryOptions.value.map((c) => ({ label: c, value: c })),
 ]);
 
 function startAddUnit() {
@@ -101,6 +143,28 @@ function confirmAddUnit(setUnit) {
   cancelAddUnit();
 }
 
+function startAddCategory() {
+  addingCategory.value = true;
+  newCategory.value = "";
+}
+
+function cancelAddCategory() {
+  addingCategory.value = false;
+  newCategory.value = "";
+}
+
+function confirmAddCategory(setCategory) {
+  const value = newCategory.value.trim();
+  if (!value) {
+    cancelAddCategory();
+    return;
+  }
+  const existing = categoryOptions.value.find((c) => c.toLowerCase() === value.toLowerCase());
+  if (!existing) categoryOptions.value.push(value);
+  setCategory(existing || value);
+  cancelAddCategory();
+}
+
 async function refresh() {
   loading.value = true;
   console.log("[stock-items] refresh: fetching items...");
@@ -110,21 +174,26 @@ async function refresh() {
     if (i.unit && !unitOptions.value.some((u) => u.toLowerCase() === i.unit.toLowerCase())) {
       unitOptions.value.push(i.unit);
     }
+    if (i.category && !categoryOptions.value.some((c) => c.toLowerCase() === i.category.toLowerCase())) {
+      categoryOptions.value.push(i.category);
+    }
   });
   console.log("[stock-items] refresh: unitOptions after merge:", [...unitOptions.value]);
   loading.value = false;
 }
 
 function openAddModal() {
-  form.value = { name: "", unit: "", price: "" };
+  form.value = { name: "", unit: "", price: "", category: "" };
   error.value = "";
   cancelAddUnit();
+  cancelAddCategory();
   showAddModal.value = true;
 }
 
 function closeAddModal() {
   showAddModal.value = false;
   cancelAddUnit();
+  cancelAddCategory();
 }
 
 async function onSubmit() {
@@ -132,9 +201,13 @@ async function onSubmit() {
   error.value = "";
   submitting.value = true;
   try {
-    const created = await createStockItem({ ...form.value, price: Number(form.value.price) });
+    const created = await createStockItem({
+      ...form.value,
+      price: Number(form.value.price),
+      category: form.value.category || null,
+    });
     console.log("[stock-items] createStockItem response:", created);
-    form.value = { name: "", unit: "", price: "" };
+    form.value = { name: "", unit: "", price: "", category: "" };
     showAddModal.value = false;
     await refresh();
   } catch (e) {
@@ -151,14 +224,17 @@ function startEdit(item) {
   editingName.value = item.name;
   editingUnit.value = item.unit;
   editingPrice.value = item.price;
+  editingCategory.value = item.category || "";
   editError.value = "";
   cancelAddUnit();
+  cancelAddCategory();
 }
 
 function cancelEdit() {
   editingId.value = null;
   editError.value = "";
   cancelAddUnit();
+  cancelAddCategory();
 }
 
 async function saveEdit() {
@@ -167,6 +243,7 @@ async function saveEdit() {
     name: editingName.value,
     unit: editingUnit.value,
     price: editingPrice.value,
+    category: editingCategory.value,
   });
   editError.value = "";
   savingEdit.value = true;
@@ -175,6 +252,7 @@ async function saveEdit() {
       name: editingName.value,
       unit: editingUnit.value,
       price: Number(editingPrice.value),
+      category: editingCategory.value || null,
     });
     console.log("[stock-items] updateStockItem response:", updated);
     editingId.value = null;
@@ -214,6 +292,29 @@ async function confirmDelete(password) {
   }
 }
 
+function openDeleteAllModal() {
+  deleteAllError.value = "";
+  showDeleteAllModal.value = true;
+}
+
+function cancelDeleteAll() {
+  showDeleteAllModal.value = false;
+}
+
+async function confirmDeleteAll(password) {
+  deleteAllError.value = "";
+  deletingAll.value = true;
+  try {
+    await deleteAllStockItems(password);
+    showDeleteAllModal.value = false;
+    await refresh();
+  } catch (e) {
+    deleteAllError.value = e instanceof ApiError ? e.detail || "Could not delete all items" : "Could not delete all items";
+  } finally {
+    deletingAll.value = false;
+  }
+}
+
 onMounted(refresh);
 </script>
 
@@ -226,6 +327,14 @@ onMounted(refresh);
       </div>
       <div class="header-actions">
         <span class="count-chip"><Icon name="count" :size="14" /> {{ items.length }} {{ items.length === 1 ? "item" : "items" }}</span>
+        <button
+          v-if="items.length"
+          type="button"
+          class="secondary danger btn-icon"
+          @click="openDeleteAllModal"
+        >
+          <Icon name="trash" :size="16" /> Delete all
+        </button>
         <button type="button" class="btn-icon" @click="openAddModal"><Icon name="plus" :size="16" /> Add item</button>
       </div>
     </div>
@@ -265,6 +374,33 @@ onMounted(refresh);
           <p v-if="addingUnit" class="unit-hint">This just selects the unit — click "Add item" below to save.</p>
         </div>
         <div class="field">
+          <label>Category</label>
+          <div class="unit-picker">
+            <button
+              v-for="c in categoryOptions"
+              :key="c"
+              type="button"
+              class="unit-pill"
+              :class="{ active: form.category === c }"
+              @click="form.category = c"
+            >
+              {{ c }}
+            </button>
+            <div v-if="addingCategory" class="unit-add">
+              <input
+                v-model="newCategory"
+                placeholder="New category"
+                autofocus
+                @keyup.enter="confirmAddCategory((v) => (form.category = v))"
+                @keyup.escape="cancelAddCategory"
+              />
+              <button type="button" class="unit-add-confirm" @click="confirmAddCategory((v) => (form.category = v))">✓ Use</button>
+              <button type="button" class="unit-add-cancel" @click="cancelAddCategory">✕</button>
+            </div>
+            <button v-else type="button" class="unit-pill unit-pill-add" @click="startAddCategory">+ Add category</button>
+          </div>
+        </div>
+        <div class="field">
           <label for="item-price">Price (₱)</label>
           <input id="item-price" v-model="form.price" type="number" min="0" step="any" required placeholder="e.g. 250" />
         </div>
@@ -292,6 +428,18 @@ onMounted(refresh);
       @cancel="cancelDelete"
     />
 
+    <ConfirmDeleteModal
+      :open="showDeleteAllModal"
+      title="Delete all stock items?"
+      message="This will permanently delete every stock item, along with all sales, delivery, and count records tied to them. This cannot be undone."
+      confirm-label="Delete all"
+      loading-label="Deleting all..."
+      :loading="deletingAll"
+      :error="deleteAllError"
+      @confirm="confirmDeleteAll"
+      @cancel="cancelDeleteAll"
+    />
+
     <div class="card filters-card">
       <div class="filters-head">
         <span class="filters-title"><Icon name="filter" :size="14" /> Filters</span>
@@ -313,6 +461,15 @@ onMounted(refresh);
         <div class="field">
           <label for="item-unit-filter">Unit</label>
           <CustomSelect id="item-unit-filter" v-model="unitFilter" :options="unitFilterOptions" placeholder="All units" />
+        </div>
+        <div class="field">
+          <label for="item-category-filter">Category</label>
+          <CustomSelect
+            id="item-category-filter"
+            v-model="categoryFilter"
+            :options="categoryFilterOptions"
+            placeholder="All categories"
+          />
         </div>
       </div>
     </div>
@@ -340,6 +497,7 @@ onMounted(refresh);
             <div class="item-card-name">{{ i.name }}</div>
             <span class="unit-chip">{{ i.unit }}</span>
           </div>
+          <span v-if="i.category" class="category-chip">{{ i.category }}</span>
           <div class="item-card-price">₱{{ i.price.toFixed(2) }}</div>
           <div class="item-card-actions">
             <button type="button" class="secondary edit btn-icon" @click="startEdit(i)"><Icon name="edit" :size="14" /> Edit</button>
@@ -403,6 +561,33 @@ onMounted(refresh);
             <button v-else type="button" class="unit-pill unit-pill-add" @click="startAddUnit">+ Add unit</button>
           </div>
           <p v-if="addingUnit" class="unit-hint">This just selects the unit — click "Save" below to save.</p>
+        </div>
+        <div class="field">
+          <label>Category</label>
+          <div class="unit-picker">
+            <button
+              v-for="c in categoryOptions"
+              :key="c"
+              type="button"
+              class="unit-pill"
+              :class="{ active: editingCategory === c }"
+              @click="editingCategory = c"
+            >
+              {{ c }}
+            </button>
+            <div v-if="addingCategory" class="unit-add">
+              <input
+                v-model="newCategory"
+                placeholder="New category"
+                autofocus
+                @keyup.enter="confirmAddCategory((v) => (editingCategory = v))"
+                @keyup.escape="cancelAddCategory"
+              />
+              <button type="button" class="unit-add-confirm" @click="confirmAddCategory((v) => (editingCategory = v))">✓ Use</button>
+              <button type="button" class="unit-add-cancel" @click="cancelAddCategory">✕</button>
+            </div>
+            <button v-else type="button" class="unit-pill unit-pill-add" @click="startAddCategory">+ Add category</button>
+          </div>
         </div>
         <div class="field">
           <label for="edit-item-price">Price (₱)</label>
@@ -749,6 +934,17 @@ onMounted(refresh);
   padding: 0.25rem 0.6rem;
   border-radius: 999px;
   white-space: nowrap;
+}
+
+.category-chip {
+  align-self: flex-start;
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
 }
 
 .item-card-price {

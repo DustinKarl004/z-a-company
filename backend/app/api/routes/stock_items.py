@@ -5,6 +5,7 @@ from app.core.database import get_db
 from app.core.deps import require_admin, require_admin_password, require_staff_or_admin
 from app.crud.stock_items import (
     create_stock_item,
+    delete_all_stock_items,
     delete_stock_item,
     get_stock_item,
     list_stock_items,
@@ -24,7 +25,9 @@ def _get_stock_item_or_404(db: Session, item_id: str):
 
 @router.post("", response_model=StockItemOut, status_code=201, dependencies=[Depends(require_admin)])
 def create_stock_item_endpoint(payload: StockItemCreate, db: Session = Depends(get_db)) -> StockItemOut:
-    item = create_stock_item(db, name=payload.name, unit=payload.unit, price=payload.price)
+    item = create_stock_item(
+        db, name=payload.name, unit=payload.unit, price=payload.price, category=payload.category
+    )
     return StockItemOut.model_validate(item)
 
 
@@ -38,7 +41,9 @@ def update_stock_item_endpoint(
     item_id: str, payload: StockItemUpdate, db: Session = Depends(get_db)
 ) -> StockItemOut:
     item = _get_stock_item_or_404(db, item_id)
-    item = update_stock_item(db, item, name=payload.name, unit=payload.unit, price=payload.price)
+    item = update_stock_item(
+        db, item, name=payload.name, unit=payload.unit, price=payload.price, category=payload.category
+    )
     return StockItemOut.model_validate(item)
 
 
@@ -52,3 +57,10 @@ def delete_stock_item_endpoint(
             status_code=status.HTTP_409_CONFLICT,
             detail="This item has existing sales, delivery, or stock records and cannot be deleted.",
         )
+
+
+@router.delete("", status_code=status.HTTP_204_NO_CONTENT)
+def delete_all_stock_items_endpoint(
+    db: Session = Depends(get_db), _: object = Depends(require_admin_password)
+) -> None:
+    delete_all_stock_items(db)
