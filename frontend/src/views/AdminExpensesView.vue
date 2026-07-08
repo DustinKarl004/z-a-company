@@ -8,6 +8,7 @@ import { createTotalSale, listSales, updateTotalSale } from "../api/sales";
 import { listStockItems } from "../api/stockItems";
 import { createStockCount, listStockCounts, updateStockCount } from "../api/stockCounts";
 import { createStockDelivery, listStockDeliveries, updateStockDelivery } from "../api/stockDeliveries";
+import ConfirmModal from "../components/ConfirmModal.vue";
 import CustomSelect from "../components/CustomSelect.vue";
 import Icon from "../components/Icon.vue";
 import LoadingState from "../components/LoadingState.vue";
@@ -493,6 +494,13 @@ function writeBranchBlock(sheet, merges, group, rowOffset, colOffset) {
   return r - rowOffset;
 }
 
+const showExportConfirm = ref(false);
+
+function confirmExportToExcel() {
+  exportToExcel();
+  showExportConfirm.value = false;
+}
+
 function exportToExcel() {
   const sheet = {};
   const merges = [];
@@ -576,7 +584,7 @@ watch([selectedDate, selectedBranchId], () => {
       <p class="page-subtitle">Daily sales, bills, and daily profit</p>
     </div>
     <div class="header-filters">
-      <button type="button" class="secondary export-excel-btn" @click="exportToExcel">
+      <button type="button" class="secondary export-excel-btn" @click="showExportConfirm = true">
         <Icon name="download" :size="14" />
         Export Excel
       </button>
@@ -773,6 +781,15 @@ watch([selectedDate, selectedBranchId], () => {
       </div>
     </div>
   </section>
+
+  <ConfirmModal
+    :open="showExportConfirm"
+    title="Export to Excel?"
+    :message="`This will download the ${selectedDate} expenses report as an Excel file.`"
+    confirm-label="Export"
+    @confirm="confirmExportToExcel"
+    @cancel="showExportConfirm = false"
+  />
 </template>
 
 <style scoped>

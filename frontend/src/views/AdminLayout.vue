@@ -89,18 +89,6 @@ function onLogout() {
             <span class="brand-subtitle">Admin Portal</span>
           </div>
         </div>
-
-        <button
-          type="button"
-          class="sidebar-close"
-          aria-label="Close navigation menu"
-          @click="menuOpen = false"
-        >
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
       </div>
 
       <nav class="nav-group">
@@ -217,10 +205,6 @@ function onLogout() {
 }
 
 .mobile-topbar {
-  display: none;
-}
-
-.sidebar-close {
   display: none;
 }
 
@@ -400,25 +384,6 @@ function onLogout() {
 
   .admin-sidebar.menu-open {
     transform: translateX(0);
-  }
-
-  .sidebar-close {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    flex-shrink: 0;
-    padding: 0;
-    background: rgba(255, 255, 255, 0.1);
-    color: #fff;
-    border: 1px solid rgba(255, 255, 255, 0.35);
-    border-radius: 8px;
-  }
-
-  .sidebar-close:hover {
-    background: var(--color-danger);
-    border-color: var(--color-danger);
   }
 
   .admin-content {
