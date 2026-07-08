@@ -12,6 +12,7 @@ import ConfirmModal from "../components/ConfirmModal.vue";
 import CustomSelect from "../components/CustomSelect.vue";
 import Icon from "../components/Icon.vue";
 import LoadingState from "../components/LoadingState.vue";
+import Modal from "../components/Modal.vue";
 
 const today = new Date().toISOString().slice(0, 10);
 
@@ -476,13 +477,21 @@ function totalValueStyleColored(color) {
   return { ...totalValueStyle, font: { ...totalValueStyle.font, color: { rgb: color } } };
 }
 
-function cell(v, style) {
-  return { v, s: style, t: typeof v === "number" ? "n" : "s" };
+function cell(v, style, link) {
+  const c = { v, s: style, t: typeof v === "number" ? "n" : "s" };
+  if (link) c.l = { Target: link };
+  return c;
 }
 
-function setCell(sheet, r, c, v, style) {
-  sheet[XLSX.utils.encode_cell({ r, c })] = cell(v, style);
+function setCell(sheet, r, c, v, style, link) {
+  sheet[XLSX.utils.encode_cell({ r, c })] = cell(v, style, link);
 }
+
+const linkCellStyle = {
+  border: allBorders,
+  alignment: { vertical: "center" },
+  font: { color: { rgb: "FF1155CC" }, underline: true, bold: true },
+};
 
 const BRANCHES_PER_ROW = 2;
 const GAP_COLS = 1;
@@ -525,19 +534,90 @@ function writeBranchBlock(sheet, merges, group, rowOffset, colOffset) {
 }
 
 const showExportConfirm = ref(false);
+const exporting = ref(false);
 
-function confirmExportToExcel() {
-  exportToExcel();
-  showExportConfirm.value = false;
+const now = new Date();
+const exportYear = now.getFullYear();
+const exportMonth = now.getMonth();
+const exportMonthLabel = now.toLocaleString("en-US", { month: "long", year: "numeric" });
+const exportDaysInMonth = new Date(exportYear, exportMonth + 1, 0).getDate();
+
+async function fetchDayReport(dateStr, items) {
+  const params = { date: dateStr };
+  const openingParams = { date: previousDay(dateStr) };
+  if (selectedBranchId.value) {
+    params.branch_id = selectedBranchId.value;
+    openingParams.branch_id = selectedBranchId.value;
+  }
+
+  const [expensesRes, salesRes, closingToday, closingYesterday, deliveriesToday] = await Promise.all([
+    listExpenses(params),
+    listSales(params),
+    listStockCounts(params),
+    listStockCounts(openingParams),
+    listStockDeliveries(params),
+  ]);
+
+  const openingMap = new Map(closingYesterday.map((c) => [`${c.branch_id}|${c.item_id}`, c.quantity_remaining]));
+  const deliveryMap = new Map();
+  for (const d of deliveriesToday) {
+    const key = `${d.branch_id}|${d.item_id}`;
+    deliveryMap.set(key, (deliveryMap.get(key) || 0) + d.quantity_delivered);
+  }
+  const closingMap = new Map(closingToday.map((c) => [`${c.branch_id}|${c.item_id}`, c.quantity_remaining]));
+  const billsMap = new Map(expensesRes.map((e) => [e.branch_id, e.amount]));
+  const salesMap = new Map(salesRes.filter((s) => s.item_id === null).map((s) => [s.branch_id, s.amount]));
+
+  const relevantBranches = selectedBranchId.value
+    ? branches.value.filter((b) => b.id === selectedBranchId.value)
+    : branches.value;
+
+  const groups = relevantBranches.map((b) => {
+    const rows = items
+      .filter((item) => !item.branch_ids || !item.branch_ids.length || item.branch_ids.includes(b.id))
+      .map((item) => {
+        const key = `${b.id}|${item.id}`;
+        const opening = openingMap.get(key) || 0;
+        const delivery = deliveryMap.get(key) || 0;
+        const closingRaw = closingMap.get(key);
+        const hasClosing = closingRaw !== undefined;
+        const closing = hasClosing ? closingRaw : null;
+        const used = hasClosing ? opening + delivery - closing : null;
+        const expense = hasClosing ? used * (item.price || 0) : null;
+        return { itemName: item.name, opening, delivery, price: item.price || 0, closing, hasClosing, used, expense };
+      });
+    const total = rows.reduce((sum, r) => sum + (r.expense || 0), 0);
+    return { branchId: b.id, name: b.name, rows, total };
+  });
+
+  const summaries = relevantBranches.map((b) => {
+    const sales = salesMap.get(b.id) || 0;
+    const bills = billsMap.get(b.id) || 0;
+    const stockExpense = groups.find((g) => g.branchId === b.id)?.total || 0;
+    const totalExpense = bills + stockExpense;
+    return { branchName: b.name, sales, bills, stockExpense, totalExpense, profit: sales - totalExpense };
+  });
+
+  const totals = summaries.reduce(
+    (acc, r) => ({
+      sales: acc.sales + r.sales,
+      bills: acc.bills + r.bills,
+      stockExpense: acc.stockExpense + r.stockExpense,
+      totalExpense: acc.totalExpense + r.totalExpense,
+      profit: acc.profit + r.profit,
+    }),
+    { sales: 0, bills: 0, stockExpense: 0, totalExpense: 0, profit: 0 }
+  );
+
+  return { groups, summaries, totals };
 }
 
-function exportToExcel() {
+function buildDaySheet(dateStr, { groups, summaries, totals }) {
   const sheet = {};
   const merges = [];
   let rowOffset = 0;
   let maxCol = 0;
 
-  const groups = stockExpenseByBranch.value;
   for (let i = 0; i < groups.length; i += BRANCHES_PER_ROW) {
     const chunk = groups.slice(i, i + BRANCHES_PER_ROW);
     let chunkHeight = 0;
@@ -551,7 +631,7 @@ function exportToExcel() {
   }
 
   const summaryStartRow = rowOffset;
-  setCell(sheet, rowOffset, 0, `Daily Sales & Bills — ${selectedDate.value}`, titleStyle);
+  setCell(sheet, rowOffset, 0, `Daily Sales & Bills — ${dateStr}`, titleStyle);
   for (let c = 1; c < EXPORT_COLS; c++) setCell(sheet, rowOffset, c, "", titleStyle);
   merges.push({ s: { r: summaryStartRow, c: 0 }, e: { r: summaryStartRow, c: EXPORT_COLS - 1 } });
   rowOffset++;
@@ -561,7 +641,7 @@ function exportToExcel() {
   );
   rowOffset++;
 
-  for (const row of exportBranchSummaries.value) {
+  for (const row of summaries) {
     setCell(sheet, rowOffset, 0, row.branchName, cellStyle);
     setCell(sheet, rowOffset, 1, peso(row.sales), cellStyleRight);
     setCell(sheet, rowOffset, 2, peso(row.bills), cellStyleRight);
@@ -573,11 +653,11 @@ function exportToExcel() {
   }
 
   setCell(sheet, rowOffset, 0, "TOTAL", totalLabelStyle);
-  setCell(sheet, rowOffset, 1, peso(totalSales.value), totalValueStyle);
-  setCell(sheet, rowOffset, 2, peso(totalBills.value), totalValueStyle);
-  setCell(sheet, rowOffset, 3, peso(stockExpenseTotal.value), totalValueStyle);
-  setCell(sheet, rowOffset, 4, peso(grandTotalExpense.value), totalValueStyle);
-  setCell(sheet, rowOffset, 5, peso(dailyProfit.value), totalValueStyleColored(dailyProfit.value >= 0 ? GREEN : RED));
+  setCell(sheet, rowOffset, 1, peso(totals.sales), totalValueStyle);
+  setCell(sheet, rowOffset, 2, peso(totals.bills), totalValueStyle);
+  setCell(sheet, rowOffset, 3, peso(totals.stockExpense), totalValueStyle);
+  setCell(sheet, rowOffset, 4, peso(totals.totalExpense), totalValueStyle);
+  setCell(sheet, rowOffset, 5, peso(totals.profit), totalValueStyleColored(totals.profit >= 0 ? GREEN : RED));
   setCell(sheet, rowOffset, 6, "", totalLabelStyle);
 
   sheet["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rowOffset, c: Math.max(maxCol, EXPORT_COLS - 1) } });
@@ -591,9 +671,96 @@ function exportToExcel() {
   }
   sheet["!cols"] = colWidths;
 
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, sheet, "Expenses");
-  XLSX.writeFile(workbook, `Expenses_${selectedDate.value}.xlsx`);
+  return sheet;
+}
+
+function buildSummarySheet(dayResults, monthLabel) {
+  const sheet = {};
+  const cols = 6;
+  let r = 0;
+
+  setCell(sheet, r, 0, `${monthLabel} — Daily Summary (click a date to jump to its sheet)`, titleStyle);
+  for (let c = 1; c < cols; c++) setCell(sheet, r, c, "", titleStyle);
+  const merges = [{ s: { r, c: 0 }, e: { r, c: cols - 1 } }];
+  r++;
+
+  ["Date", "Sales", "Daily Bills", "Stock Expense", "Total Expense", "Profit"].forEach((h, i) =>
+    setCell(sheet, r, i, h, headerStyle)
+  );
+  r++;
+
+  const monthTotals = { sales: 0, bills: 0, stockExpense: 0, totalExpense: 0, profit: 0 };
+  for (const day of dayResults) {
+    setCell(sheet, r, 0, day.tabName, linkCellStyle, `#'${day.tabName}'!A1`);
+    setCell(sheet, r, 1, peso(day.totals.sales), cellStyleRight);
+    setCell(sheet, r, 2, peso(day.totals.bills), cellStyleRight);
+    setCell(sheet, r, 3, peso(day.totals.stockExpense), cellStyleRight);
+    setCell(sheet, r, 4, peso(day.totals.totalExpense), cellStyleRight);
+    setCell(sheet, r, 5, peso(day.totals.profit), cellStyleColored(day.totals.profit >= 0 ? GREEN : RED));
+    monthTotals.sales += day.totals.sales;
+    monthTotals.bills += day.totals.bills;
+    monthTotals.stockExpense += day.totals.stockExpense;
+    monthTotals.totalExpense += day.totals.totalExpense;
+    monthTotals.profit += day.totals.profit;
+    r++;
+  }
+
+  setCell(sheet, r, 0, "MONTH TOTAL", totalLabelStyle);
+  setCell(sheet, r, 1, peso(monthTotals.sales), totalValueStyle);
+  setCell(sheet, r, 2, peso(monthTotals.bills), totalValueStyle);
+  setCell(sheet, r, 3, peso(monthTotals.stockExpense), totalValueStyle);
+  setCell(sheet, r, 4, peso(monthTotals.totalExpense), totalValueStyle);
+  setCell(sheet, r, 5, peso(monthTotals.profit), totalValueStyleColored(monthTotals.profit >= 0 ? GREEN : RED));
+
+  sheet["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r, c: cols - 1 } });
+  sheet["!merges"] = merges;
+  sheet["!cols"] = [{ wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 12 }];
+
+  return sheet;
+}
+
+function confirmExportToExcel() {
+  exportToExcel();
+  showExportConfirm.value = false;
+}
+
+const exportProgress = reactive({ current: 0, total: exportDaysInMonth });
+
+async function exportToExcel() {
+  exporting.value = true;
+  exportProgress.current = 0;
+  exportProgress.total = exportDaysInMonth;
+  try {
+    const items = stockItems.value.length ? stockItems.value : await listStockItems();
+    const workbook = XLSX.utils.book_new();
+    const dayResults = [];
+
+    for (let day = 1; day <= exportDaysInMonth; day++) {
+      const dateStr = `${exportYear}-${String(exportMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      const report = await fetchDayReport(dateStr, items);
+      const sheet = buildDaySheet(dateStr, report);
+      const tabName = new Date(`${dateStr}T00:00:00Z`).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        timeZone: "UTC",
+      });
+      XLSX.utils.book_append_sheet(workbook, sheet, tabName);
+      dayResults.push({ dateStr, tabName, totals: report.totals });
+      exportProgress.current = day;
+    }
+
+    const summarySheet = buildSummarySheet(dayResults, exportMonthLabel);
+    XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
+    const summaryIdx = workbook.SheetNames.indexOf("Summary");
+    workbook.SheetNames.splice(summaryIdx, 1);
+    workbook.SheetNames.unshift("Summary");
+
+    workbook.Workbook = { WBView: [{ activeTab: 0, tabRatio: 700 }] };
+
+    XLSX.writeFile(workbook, `Expenses_${exportMonthLabel.replace(" ", "_")}.xlsx`);
+  } finally {
+    exporting.value = false;
+  }
 }
 
 onMounted(async () => {
@@ -614,9 +781,14 @@ watch([selectedDate, selectedBranchId], () => {
       <p class="page-subtitle">Daily sales, bills, and daily profit</p>
     </div>
     <div class="header-filters">
-      <button type="button" class="secondary export-excel-btn" @click="showExportConfirm = true">
+      <button
+        type="button"
+        class="secondary export-excel-btn"
+        :disabled="exporting"
+        @click="showExportConfirm = true"
+      >
         <Icon name="download" :size="14" />
-        Export Excel
+        {{ exporting ? "Exporting..." : "Export Excel" }}
       </button>
       <input v-model="selectedDate" type="date" />
       <CustomSelect v-model="selectedBranchId" :options="branchOptions" placeholder="All branches" />
@@ -825,11 +997,27 @@ watch([selectedDate, selectedBranchId], () => {
   <ConfirmModal
     :open="showExportConfirm"
     title="Export to Excel?"
-    :message="`This will download the ${selectedDate} expenses report as an Excel file.`"
+    :message="`This will download the ${exportMonthLabel} expenses report as an Excel file, with one sheet per day.`"
     confirm-label="Export"
     @confirm="confirmExportToExcel"
     @cancel="showExportConfirm = false"
   />
+
+  <Modal v-if="exporting" title="Exporting Excel" @close="() => {}">
+    <div class="export-progress">
+      <span class="loading-spinner" aria-hidden="true"></span>
+      <p class="export-progress-label">
+        Exporting {{ exportMonthLabel }}… day {{ exportProgress.current }} of {{ exportProgress.total }}
+      </p>
+      <div class="export-progress-bar">
+        <div
+          class="export-progress-fill"
+          :style="{ width: `${(exportProgress.current / exportProgress.total) * 100}%` }"
+        ></div>
+      </div>
+      <p class="export-progress-hint">Please keep this page open until the download starts.</p>
+    </div>
+  </Modal>
 </template>
 
 <style scoped>
@@ -1158,6 +1346,59 @@ watch([selectedDate, selectedBranchId], () => {
 @media (max-width: 560px) {
   .stat-row {
     grid-template-columns: 1fr;
+  }
+}
+
+.export-progress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.5rem 0 0.75rem;
+  text-align: center;
+}
+
+.export-progress .loading-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  animation: export-progress-spin 0.7s linear infinite;
+}
+
+.export-progress-label {
+  margin: 0;
+  font-weight: 600;
+  color: var(--color-text);
+  font-size: 0.95rem;
+}
+
+.export-progress-bar {
+  width: 100%;
+  max-width: 280px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+}
+
+.export-progress-fill {
+  height: 100%;
+  background: var(--gradient-primary, var(--color-primary));
+  transition: width 0.2s ease;
+}
+
+.export-progress-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+@keyframes export-progress-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>
