@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { ApiError } from "../api/client";
 import { listBranches } from "../api/branches";
 import { listStockItems } from "../api/stockItems";
-import { listStockDeliveries, updateStockDelivery } from "../api/stockDeliveries";
+import { listStockNeeds, updateStockNeed } from "../api/stockNeeds";
 import Icon from "../components/Icon.vue";
 import LoadingState from "../components/LoadingState.vue";
 import { toLocalISO, fetchBusinessToday } from "../utils/date";
@@ -91,7 +91,7 @@ async function refresh() {
     const [branchList, itemList, ...results] = await Promise.all([
       listBranches(),
       listStockItems(),
-      ...dayList.value.map((day) => listStockDeliveries({ date: day.value, is_short: true })),
+      ...dayList.value.map((day) => listStockNeeds({ date: day.value })),
     ]);
     branches.value = branchList;
     stockItems.value = itemList;
@@ -115,7 +115,7 @@ async function toggleNeed(need) {
   actionError.value = "";
   savingIds.value.add(need.id);
   try {
-    await updateStockDelivery(need.id, { is_delivered: !need.is_delivered });
+    await updateStockNeed(need.id, { is_delivered: !need.is_delivered });
     await refresh();
   } catch (e) {
     actionError.value = e instanceof ApiError ? e.detail || "Could not update" : "Could not update";
@@ -132,7 +132,7 @@ async function toggleGroup(day, group) {
   if (!toUpdate.length) return;
   groupSaving.value.add(key);
   try {
-    await Promise.all(toUpdate.map((n) => updateStockDelivery(n.id, { is_delivered: target })));
+    await Promise.all(toUpdate.map((n) => updateStockNeed(n.id, { is_delivered: target })));
     await refresh();
   } catch (e) {
     actionError.value = e instanceof ApiError ? e.detail || "Could not update" : "Could not update";

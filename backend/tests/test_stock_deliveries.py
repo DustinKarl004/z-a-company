@@ -5,7 +5,7 @@ def test_staff_can_create_and_list_own_branch_delivery(client, staff_token, bran
     headers = {"Authorization": f"Bearer {staff_token}"}
     resp = client.post(
         "/stock-deliveries",
-        json={"item_id": stock_item.id, "quantity_delivered": 50, "is_short": False},
+        json={"item_id": stock_item.id, "quantity_delivered": 50},
         headers=headers,
     )
     assert resp.status_code == 201
@@ -22,12 +22,7 @@ def test_staff_cannot_create_for_another_branch(client, staff_token, branch2, st
     headers = {"Authorization": f"Bearer {staff_token}"}
     resp = client.post(
         "/stock-deliveries",
-        json={
-            "branch_id": branch2.id,
-            "item_id": stock_item.id,
-            "quantity_delivered": 10,
-            "is_short": False,
-        },
+        json={"branch_id": branch2.id, "item_id": stock_item.id, "quantity_delivered": 10},
         headers=headers,
     )
     assert resp.status_code == 201
@@ -39,12 +34,7 @@ def test_staff_cannot_backdate_delivery(client, staff_token, stock_item):
     yesterday = (date.today() - timedelta(days=1)).isoformat()
     resp = client.post(
         "/stock-deliveries",
-        json={
-            "item_id": stock_item.id,
-            "date": yesterday,
-            "quantity_delivered": 10,
-            "is_short": False,
-        },
+        json={"item_id": stock_item.id, "date": yesterday, "quantity_delivered": 10},
         headers=headers,
     )
     assert resp.status_code == 400
@@ -60,7 +50,6 @@ def test_staff_cannot_edit_yesterdays_delivery(client, admin_token, staff_token,
             "item_id": stock_item.id,
             "date": yesterday,
             "quantity_delivered": 10,
-            "is_short": False,
         },
         headers=admin_headers,
     )
@@ -78,16 +67,16 @@ def test_staff_can_edit_todays_delivery(client, staff_token, stock_item):
     headers = {"Authorization": f"Bearer {staff_token}"}
     resp = client.post(
         "/stock-deliveries",
-        json={"item_id": stock_item.id, "quantity_delivered": 10, "is_short": False},
+        json={"item_id": stock_item.id, "quantity_delivered": 10},
         headers=headers,
     )
     delivery_id = resp.json()["id"]
 
     resp = client.patch(
-        f"/stock-deliveries/{delivery_id}", json={"is_short": True}, headers=headers
+        f"/stock-deliveries/{delivery_id}", json={"quantity_delivered": 15}, headers=headers
     )
     assert resp.status_code == 200
-    assert resp.json()["is_short"] is True
+    assert resp.json()["quantity_delivered"] == 15
 
 
 def test_staff_cannot_see_another_branchs_deliveries(
@@ -96,7 +85,7 @@ def test_staff_cannot_see_another_branchs_deliveries(
     headers2 = {"Authorization": f"Bearer {staff_token2}"}
     client.post(
         "/stock-deliveries",
-        json={"item_id": stock_item.id, "quantity_delivered": 5, "is_short": False},
+        json={"item_id": stock_item.id, "quantity_delivered": 5},
         headers=headers2,
     )
 
@@ -106,40 +95,11 @@ def test_staff_cannot_see_another_branchs_deliveries(
     assert resp.json() == []
 
 
-def test_delivery_staff_can_mark_old_need_delivered(client, admin_token, delivery_token, branch, stock_item):
-    admin_headers = {"Authorization": f"Bearer {admin_token}"}
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
-    resp = client.post(
-        "/stock-deliveries",
-        json={
-            "branch_id": branch.id,
-            "item_id": stock_item.id,
-            "date": yesterday,
-            "quantity_delivered": 0,
-            "is_short": True,
-        },
-        headers=admin_headers,
-    )
-    assert resp.status_code == 201
-    delivery_id = resp.json()["id"]
-    assert resp.json()["is_delivered"] is False
-
-    delivery_headers = {"Authorization": f"Bearer {delivery_token}"}
-    # marking delivered bypasses the today-only edit restriction
-    resp = client.patch(
-        f"/stock-deliveries/{delivery_id}", json={"is_delivered": True}, headers=delivery_headers
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["is_delivered"] is True
-    assert body["is_short"] is True  # marking delivered doesn't clear the original flag
-
-
 def test_all_branch_delivery_staff_must_specify_branch(client, delivery_token, stock_item):
     headers = {"Authorization": f"Bearer {delivery_token}"}
     resp = client.post(
         "/stock-deliveries",
-        json={"item_id": stock_item.id, "quantity_delivered": 10, "is_short": False},
+        json={"item_id": stock_item.id, "quantity_delivered": 10},
         headers=headers,
     )
     assert resp.status_code == 400
@@ -151,7 +111,7 @@ def test_all_branch_delivery_staff_can_log_and_list_across_branches(
     headers = {"Authorization": f"Bearer {delivery_token}"}
     resp = client.post(
         "/stock-deliveries",
-        json={"branch_id": branch.id, "item_id": stock_item.id, "quantity_delivered": 10, "is_short": False},
+        json={"branch_id": branch.id, "item_id": stock_item.id, "quantity_delivered": 10},
         headers=headers,
     )
     assert resp.status_code == 201
@@ -159,7 +119,7 @@ def test_all_branch_delivery_staff_can_log_and_list_across_branches(
 
     resp = client.post(
         "/stock-deliveries",
-        json={"branch_id": branch2.id, "item_id": stock_item.id, "quantity_delivered": 5, "is_short": False},
+        json={"branch_id": branch2.id, "item_id": stock_item.id, "quantity_delivered": 5},
         headers=headers,
     )
     assert resp.status_code == 201
@@ -173,11 +133,47 @@ def test_all_branch_delivery_staff_can_log_and_list_across_branches(
     assert len(resp.json()) == 1
 
 
+def test_staff_can_delete_todays_delivery(client, staff_token, stock_item):
+    headers = {"Authorization": f"Bearer {staff_token}"}
+    resp = client.post(
+        "/stock-deliveries",
+        json={"item_id": stock_item.id, "quantity_delivered": 10},
+        headers=headers,
+    )
+    delivery_id = resp.json()["id"]
+
+    resp = client.delete(f"/stock-deliveries/{delivery_id}", headers=headers)
+    assert resp.status_code == 204
+
+    resp = client.get("/stock-deliveries", headers=headers)
+    assert resp.json() == []
+
+
+def test_staff_cannot_delete_yesterdays_delivery(client, admin_token, staff_token, branch, stock_item):
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    resp = client.post(
+        "/stock-deliveries",
+        json={
+            "branch_id": branch.id,
+            "item_id": stock_item.id,
+            "date": yesterday,
+            "quantity_delivered": 10,
+        },
+        headers=admin_headers,
+    )
+    delivery_id = resp.json()["id"]
+
+    staff_headers = {"Authorization": f"Bearer {staff_token}"}
+    resp = client.delete(f"/stock-deliveries/{delivery_id}", headers=staff_headers)
+    assert resp.status_code == 403
+
+
 def test_admin_can_filter_by_branch_and_date(client, admin_token, branch, stock_item):
     headers = {"Authorization": f"Bearer {admin_token}"}
     client.post(
         "/stock-deliveries",
-        json={"branch_id": branch.id, "item_id": stock_item.id, "quantity_delivered": 5, "is_short": False},
+        json={"branch_id": branch.id, "item_id": stock_item.id, "quantity_delivered": 5},
         headers=headers,
     )
     resp = client.get(

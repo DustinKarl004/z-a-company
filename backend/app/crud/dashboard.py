@@ -11,6 +11,7 @@ from app.models.sale import Sale
 from app.models.stock_count import StockCount
 from app.models.stock_delivery import StockDelivery
 from app.models.stock_item import StockItem
+from app.models.stock_need import StockNeed
 from app.models.user import User
 
 
@@ -67,11 +68,10 @@ def _branch_summary(db: Session, branch: Branch, start: date_type, end: date_typ
     total_expenses = _stock_expense_total(db, branch.id, start, end) + total_bills
     has_shortfall = (
         db.scalar(
-            select(StockDelivery.id).where(
-                StockDelivery.branch_id == branch.id,
-                StockDelivery.date >= start,
-                StockDelivery.date <= end,
-                StockDelivery.is_short.is_(True),
+            select(StockNeed.id).where(
+                StockNeed.branch_id == branch.id,
+                StockNeed.date >= start,
+                StockNeed.date <= end,
             )
         )
         is not None

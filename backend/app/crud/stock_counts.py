@@ -68,3 +68,8 @@ def reassign_date(db: Session, count: StockCount, *, date_: date) -> StockCount:
     db.commit()
     db.refresh(count)
     return count
+
+
+def delete_count(db: Session, count: StockCount) -> None:
+    db.delete(count)
+    db.commit()

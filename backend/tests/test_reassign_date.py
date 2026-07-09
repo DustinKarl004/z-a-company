@@ -55,7 +55,7 @@ def test_admin_can_reassign_stock_delivery_date(client, admin_token, branch, sto
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
     resp = client.post(
         "/stock-deliveries",
-        json={"branch_id": branch.id, "item_id": stock_item.id, "quantity_delivered": 5, "is_short": False},
+        json={"branch_id": branch.id, "item_id": stock_item.id, "quantity_delivered": 5},
         headers=admin_headers,
     )
     delivery_id = resp.json()["id"]
@@ -70,7 +70,7 @@ def test_staff_cannot_reassign_stock_delivery_date(client, staff_token, stock_it
     headers = {"Authorization": f"Bearer {staff_token}"}
     resp = client.post(
         "/stock-deliveries",
-        json={"item_id": stock_item.id, "quantity_delivered": 5, "is_short": False},
+        json={"item_id": stock_item.id, "quantity_delivered": 5},
         headers=headers,
     )
     delivery_id = resp.json()["id"]

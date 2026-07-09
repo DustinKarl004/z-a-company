@@ -14,3 +14,7 @@ export function createStockCount({ branchId, itemId, quantityRemaining, date }) 
 export function updateStockCount(id, payload) {
   return apiFetch(`/stock-counts/${id}`, { method: "PATCH", body: payload });
 }
+
+export function deleteStockCount(id) {
+  return apiFetch(`/stock-counts/${id}`, { method: "DELETE" });
+}

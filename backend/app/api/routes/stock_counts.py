@@ -9,6 +9,7 @@ from app.core.scoping import ensure_creatable_date, ensure_editable, resolve_bra
 from app.crud.branches import get_branch
 from app.crud.stock_counts import (
     create_count,
+    delete_count,
     get_count,
     get_count_for_day,
     list_counts,
@@ -91,3 +92,18 @@ def update_count_endpoint(
         count = update_count(db, count, quantity_remaining=payload.quantity_remaining)
 
     return StockCountOut.model_validate(count)
+
+
+@router.delete("/{count_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_count_endpoint(
+    count_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_staff_or_admin),
+) -> None:
+    count = get_count(db, count_id)
+    if count is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Count not found")
+    if user.role == "staff" and count.branch_id != user.branch_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your branch")
+    ensure_editable(user, count.date)
+    delete_count(db, count)

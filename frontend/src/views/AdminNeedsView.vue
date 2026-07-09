@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { listBranches } from "../api/branches";
 import { ApiError } from "../api/client";
 import { listStockItems } from "../api/stockItems";
-import { listStockDeliveries } from "../api/stockDeliveries";
+import { listStockNeeds } from "../api/stockNeeds";
 import Icon from "../components/Icon.vue";
 import LoadingState from "../components/LoadingState.vue";
 import { toLocalISO, fetchBusinessToday } from "../utils/date";
@@ -79,7 +79,7 @@ async function refresh() {
     const { date } = await fetchBusinessToday();
     dayList.value = buildDayList(date);
     const results = await Promise.all(
-      dayList.value.map((day) => listStockDeliveries({ date: day.value, is_short: true }))
+      dayList.value.map((day) => listStockNeeds({ date: day.value }))
     );
     needsByDay.value = Object.fromEntries(dayList.value.map((day, i) => [day.value, results[i]]));
   } catch (e) {

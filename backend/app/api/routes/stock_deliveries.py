@@ -8,8 +8,8 @@ from app.core.deps import require_staff_or_admin
 from app.core.scoping import ensure_creatable_date, ensure_editable, resolve_branch_id
 from app.crud.branches import get_branch
 from app.crud.stock_deliveries import (
-    clear_stale_short_flags,
     create_delivery,
+    delete_delivery,
     get_delivery,
     get_delivery_for_day,
     list_deliveries,
@@ -42,9 +42,7 @@ def create_delivery_endpoint(
 
     existing = get_delivery_for_day(db, branch_id=branch_id, item_id=payload.item_id, date_=payload.date)
     if existing is not None:
-        updated = update_delivery(
-            db, existing, quantity_delivered=payload.quantity_delivered, is_short=payload.is_short
-        )
+        updated = update_delivery(db, existing, quantity_delivered=payload.quantity_delivered)
         return StockDeliveryOut.model_validate(updated)
 
     delivery = create_delivery(
@@ -53,7 +51,6 @@ def create_delivery_endpoint(
         item_id=payload.item_id,
         date_=payload.date,
         quantity_delivered=payload.quantity_delivered,
-        is_short=payload.is_short,
         created_by_id=user.id,
     )
     return StockDeliveryOut.model_validate(delivery)
@@ -63,16 +60,13 @@ def create_delivery_endpoint(
 def list_deliveries_endpoint(
     branch_id: str | None = None,
     date: date_type | None = None,
-    is_short: bool | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(require_staff_or_admin),
 ) -> list[StockDeliveryOut]:
-    if is_short:
-        clear_stale_short_flags(db)
     effective_branch_id = branch_id if (user.role == "admin" or not user.branch_id) else user.branch_id
     return [
         StockDeliveryOut.model_validate(d)
-        for d in list_deliveries(db, branch_id=effective_branch_id, date_=date, is_short=is_short)
+        for d in list_deliveries(db, branch_id=effective_branch_id, date_=date)
     ]
 
 
@@ -99,14 +93,23 @@ def update_delivery_endpoint(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="An entry already exists for that date")
         delivery = reassign_date(db, delivery, date_=payload.date)
 
-    if payload.quantity_delivered is not None or payload.is_short is not None:
+    if payload.quantity_delivered is not None:
         ensure_editable(user, delivery.date)
+        delivery = update_delivery(db, delivery, quantity_delivered=payload.quantity_delivered)
 
-    updated = update_delivery(
-        db,
-        delivery,
-        quantity_delivered=payload.quantity_delivered,
-        is_short=payload.is_short,
-        is_delivered=payload.is_delivered,
-    )
-    return StockDeliveryOut.model_validate(updated)
+    return StockDeliveryOut.model_validate(delivery)
+
+
+@router.delete("/{delivery_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_delivery_endpoint(
+    delivery_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_staff_or_admin),
+) -> None:
+    delivery = get_delivery(db, delivery_id)
+    if delivery is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Delivery not found")
+    if user.role == "staff" and user.branch_id and delivery.branch_id != user.branch_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your branch")
+    ensure_editable(user, delivery.date)
+    delete_delivery(db, delivery)

@@ -2,8 +2,9 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { ApiError } from "../api/client";
 import { listStockItems } from "../api/stockItems";
-import { createStockDelivery, listStockDeliveries, updateStockDelivery } from "../api/stockDeliveries";
-import { createStockCount, listStockCounts, updateStockCount } from "../api/stockCounts";
+import { createStockDelivery, deleteStockDelivery, listStockDeliveries, updateStockDelivery } from "../api/stockDeliveries";
+import { createStockCount, deleteStockCount, listStockCounts, updateStockCount } from "../api/stockCounts";
+import { createStockNeed, deleteStockNeed, listStockNeeds } from "../api/stockNeeds";
 import { createTotalSale, listSales, updateTotalSale } from "../api/sales";
 import { useAuthStore } from "../stores/auth";
 import Icon from "../components/Icon.vue";
@@ -82,7 +83,6 @@ function rowFor(itemId) {
       delivery: "",
       deliveryTouched: false,
       deliveryId: null,
-      isShort: false,
       deliverySaving: false,
       deliverySaved: false,
       deliveryError: "",
@@ -92,6 +92,11 @@ function rowFor(itemId) {
       closingSaving: false,
       closingSaved: false,
       closingError: "",
+      needId: null,
+      needChecked: false,
+      needTouched: false,
+      needSaving: false,
+      needError: "",
     };
   }
   return rows[itemId];
@@ -113,7 +118,7 @@ const filteredItems = computed(() => {
 });
 
 const loggedTodayCount = computed(
-  () => Object.values(rows).filter((r) => r.deliveryId || r.closingId).length
+  () => Object.values(rows).filter((r) => r.delivery !== "" || r.closing !== "").length
 );
 
 function kilogramUsed(itemId) {
@@ -134,12 +139,13 @@ function isComplete(itemId) {
 async function refresh() {
   loading.value = true;
   error.value = "";
-  const [items, todayDeliveries, todayCounts, openingCounts, todaySales] = await Promise.all([
+  const [items, todayDeliveries, todayCounts, openingCounts, todaySales, todayNeeds] = await Promise.all([
     listStockItems(),
     listStockDeliveries({ date: today.value }),
     listStockCounts({ date: today.value }),
     listStockCounts({ date: yesterday.value }),
     listSales({ date: today.value }),
+    listStockNeeds({ date: today.value }),
   ]);
   stockItems.value = items;
 
@@ -148,17 +154,24 @@ async function refresh() {
   for (const item of items) {
     const r = rowFor(item.id);
     r.opening = openingByItem.has(item.id) ? openingByItem.get(item.id) : 0;
+    r.needId = null;
+    r.needChecked = false;
+    r.needTouched = false;
   }
   for (const d of todayDeliveries) {
     const r = rowFor(d.item_id);
     r.delivery = String(d.quantity_delivered);
     r.deliveryId = d.id;
-    r.isShort = d.is_short;
   }
   for (const c of todayCounts) {
     const r = rowFor(c.item_id);
     r.closing = String(c.quantity_remaining);
     r.closingId = c.id;
+  }
+  for (const n of todayNeeds) {
+    const r = rowFor(n.item_id);
+    r.needId = n.id;
+    r.needChecked = true;
   }
 
   const existingTotalSale = todaySales.find((s) => s.item_id === null);
@@ -203,20 +216,21 @@ async function saveDelivery(itemId) {
   const r = rowFor(itemId);
   r.deliveryError = "";
   if (Number.isNaN(Number(r.delivery))) return;
-  const quantity = r.delivery === "" ? 0 : Number(r.delivery);
   r.deliverySaving = true;
   try {
+    if (r.delivery === "") {
+      if (r.deliveryId) {
+        await deleteStockDelivery(r.deliveryId);
+        r.deliveryId = null;
+      }
+      flashSaved(r, "delivery");
+      return;
+    }
+    const quantity = Number(r.delivery);
     if (r.deliveryId) {
-      await updateStockDelivery(r.deliveryId, {
-        quantity_delivered: quantity,
-        is_short: r.isShort,
-      });
+      await updateStockDelivery(r.deliveryId, { quantity_delivered: quantity });
     } else {
-      const created = await createStockDelivery({
-        itemId,
-        quantityDelivered: quantity,
-        isShort: r.isShort,
-      });
+      const created = await createStockDelivery({ itemId, quantityDelivered: quantity });
       r.deliveryId = created.id;
     }
     flashSaved(r, "delivery");
@@ -231,9 +245,17 @@ async function saveClosing(itemId) {
   const r = rowFor(itemId);
   r.closingError = "";
   if (Number.isNaN(Number(r.closing))) return;
-  const quantity = r.closing === "" ? 0 : Number(r.closing);
   r.closingSaving = true;
   try {
+    if (r.closing === "") {
+      if (r.closingId) {
+        await deleteStockCount(r.closingId);
+        r.closingId = null;
+      }
+      flashSaved(r, "closing");
+      return;
+    }
+    const quantity = Number(r.closing);
     if (r.closingId) {
       await updateStockCount(r.closingId, { quantity_remaining: quantity });
     } else {
@@ -254,6 +276,31 @@ function useOpeningAsClosing(itemId) {
   r.closingTouched = true;
 }
 
+function toggleNeed(itemId, checked) {
+  const r = rowFor(itemId);
+  r.needChecked = checked;
+  r.needTouched = true;
+}
+
+async function saveNeed(itemId) {
+  const r = rowFor(itemId);
+  r.needError = "";
+  r.needSaving = true;
+  try {
+    if (r.needChecked && !r.needId) {
+      const created = await createStockNeed({ itemId, date: today.value });
+      r.needId = created.id;
+    } else if (!r.needChecked && r.needId) {
+      await deleteStockNeed(r.needId);
+      r.needId = null;
+    }
+  } catch (e) {
+    r.needError = e instanceof ApiError ? e.detail || "Could not save" : "Could not save";
+  } finally {
+    r.needSaving = false;
+  }
+}
+
 async function submitAll() {
   submitError.value = "";
   submitting.value = true;
@@ -263,8 +310,10 @@ async function submitAll() {
       const r = rowFor(item.id);
       if (r.deliveryTouched) await saveDelivery(item.id);
       if (r.closingTouched) await saveClosing(item.id);
+      if (r.needTouched) await saveNeed(item.id);
     }
-    const hasError = totalSale.error || Object.values(rows).some((r) => r.deliveryError || r.closingError);
+    const hasError =
+      totalSale.error || Object.values(rows).some((r) => r.deliveryError || r.closingError || r.needError);
     if (hasError) {
       submitError.value = "Some entries could not be saved. Please check and try again.";
       return;
@@ -364,6 +413,7 @@ onUnmounted(() => {
       <div v-for="item in filteredItems" :key="item.id" class="stock-row">
         <div class="row-main">
           <span class="item-name">{{ item.name }}</span>
+          <span v-if="item.unit" class="unit-chip">{{ item.unit }}</span>
           <span v-if="item.category" class="category-chip">{{ item.category }}</span>
         </div>
 
@@ -430,14 +480,16 @@ onUnmounted(() => {
         <label class="short-toggle">
           <input
             type="checkbox"
-            v-model="rowFor(item.id).isShort"
-            @change="rowFor(item.id).deliveryTouched = true"
+            :checked="rowFor(item.id).needChecked"
+            :disabled="rowFor(item.id).needSaving"
+            @change="toggleNeed(item.id, $event.target.checked)"
           />
           Need Deliver
         </label>
 
         <p v-if="rowFor(item.id).deliveryError" class="row-error">{{ rowFor(item.id).deliveryError }}</p>
         <p v-if="rowFor(item.id).closingError" class="row-error">{{ rowFor(item.id).closingError }}</p>
+        <p v-if="rowFor(item.id).needError" class="row-error">{{ rowFor(item.id).needError }}</p>
       </div>
     </div>
 
@@ -641,6 +693,17 @@ onUnmounted(() => {
 .item-name {
   font-weight: 600;
   color: var(--color-text);
+}
+
+.unit-chip {
+  flex-shrink: 0;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  white-space: nowrap;
 }
 
 .category-chip {
