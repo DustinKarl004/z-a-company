@@ -95,3 +95,10 @@ def update_delivery(
     db.commit()
     db.refresh(delivery)
     return delivery
+
+
+def reassign_date(db: Session, delivery: StockDelivery, *, date_: date) -> StockDelivery:
+    delivery.date = date_
+    db.commit()
+    db.refresh(delivery)
+    return delivery

@@ -64,3 +64,10 @@ def update_sale_amount(db: Session, sale: Sale, *, amount: float) -> Sale:
     db.commit()
     db.refresh(sale)
     return sale
+
+
+def reassign_date(db: Session, sale: Sale, *, date_: date) -> Sale:
+    sale.date = date_
+    db.commit()
+    db.refresh(sale)
+    return sale

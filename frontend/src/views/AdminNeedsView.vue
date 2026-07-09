@@ -6,7 +6,7 @@ import { listStockItems } from "../api/stockItems";
 import { listStockDeliveries } from "../api/stockDeliveries";
 import Icon from "../components/Icon.vue";
 import LoadingState from "../components/LoadingState.vue";
-import { toLocalISO } from "../utils/date";
+import { toLocalISO, fetchBusinessToday } from "../utils/date";
 
 const RETENTION_DAYS = 3;
 
@@ -14,14 +14,20 @@ function toDateStr(d) {
   return toLocalISO(d);
 }
 
-const dayList = Array.from({ length: RETENTION_DAYS }, (_, i) => {
-  const dateStr = toDateStr(new Date(Date.now() - i * 24 * 60 * 60 * 1000));
-  let label;
-  if (i === 0) label = "Today";
-  else if (i === 1) label = "1 day ago";
-  else label = `${i} days ago`;
-  return { value: dateStr, label };
-});
+function buildDayList(businessToday) {
+  return Array.from({ length: RETENTION_DAYS }, (_, i) => {
+    const d = new Date(businessToday);
+    d.setDate(d.getDate() - i);
+    const dateStr = toDateStr(d);
+    let label;
+    if (i === 0) label = "Today";
+    else if (i === 1) label = "1 day ago";
+    else label = `${i} days ago`;
+    return { value: dateStr, label };
+  });
+}
+
+const dayList = ref([]);
 
 const branches = ref([]);
 const stockItems = ref([]);
@@ -49,14 +55,14 @@ function groupByBranch(needs) {
 }
 
 const dayCounts = computed(() =>
-  dayList.map((day) => ({ ...day, count: (needsByDay.value[day.value] || []).length }))
+  dayList.value.map((day) => ({ ...day, count: (needsByDay.value[day.value] || []).length }))
 );
 
 const daySections = computed(() =>
-  dayList
+  dayList.value
     .map((day, i) => ({
       ...day,
-      isOldest: i === dayList.length - 1,
+      isOldest: i === dayList.value.length - 1,
       groups: groupByBranch(needsByDay.value[day.value] || []),
     }))
     .filter((day) => day.groups.length)
@@ -70,10 +76,12 @@ async function refresh() {
   loading.value = true;
   error.value = "";
   try {
+    const { date } = await fetchBusinessToday();
+    dayList.value = buildDayList(date);
     const results = await Promise.all(
-      dayList.map((day) => listStockDeliveries({ date: day.value, is_short: true }))
+      dayList.value.map((day) => listStockDeliveries({ date: day.value, is_short: true }))
     );
-    needsByDay.value = Object.fromEntries(dayList.map((day, i) => [day.value, results[i]]));
+    needsByDay.value = Object.fromEntries(dayList.value.map((day, i) => [day.value, results[i]]));
   } catch (e) {
     error.value = e instanceof ApiError ? e.detail || "Could not load needs" : "Could not load needs";
   } finally {

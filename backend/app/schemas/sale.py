@@ -16,6 +16,7 @@ class SaleCreate(BaseModel):
 class SaleUpdate(BaseModel):
     quantity_sold: float | None = None
     amount: float | None = None
+    date: date_type | None = None
 
 
 class SaleOut(BaseModel):

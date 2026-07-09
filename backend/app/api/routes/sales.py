@@ -12,6 +12,7 @@ from app.crud.sales import (
     get_sale,
     get_total_sale_for_day,
     list_sales,
+    reassign_date,
     update_sale,
     update_sale_amount,
 )
@@ -94,16 +95,26 @@ def update_sale_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sale not found")
     if user.role == "staff" and sale.branch_id != user.branch_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your branch")
-    ensure_editable(user, sale.date)
+
+    if payload.date is not None and payload.date != sale.date:
+        if user.role != "admin":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admin can reassign the date")
+        if sale.item_id is None:
+            conflict = get_total_sale_for_day(db, branch_id=sale.branch_id, date_=payload.date)
+            if conflict is not None and conflict.id != sale.id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A total sale already exists for that date")
+        sale = reassign_date(db, sale, date_=payload.date)
 
     if sale.item_id is None:
         if payload.amount is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="amount is required")
+            return SaleOut.model_validate(sale)
+        ensure_editable(user, sale.date)
         updated = update_sale_amount(db, sale, amount=payload.amount)
         return SaleOut.model_validate(updated)
 
     if payload.quantity_sold is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="quantity_sold is required")
+        return SaleOut.model_validate(sale)
+    ensure_editable(user, sale.date)
     item = get_stock_item(db, sale.item_id)
     updated = update_sale(
         db, sale, quantity_sold=payload.quantity_sold, amount=payload.quantity_sold * item.price

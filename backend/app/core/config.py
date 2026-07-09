@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     # are computed against it, not the server host's (often UTC) system clock.
     app_timezone: str = "Asia/Manila"
 
+    # Branches can stay open past midnight, so the "business day" rolls over at this
+    # hour instead of 12am — e.g. 6 means anything before 6am still counts as yesterday.
+    business_day_cutoff_hour: int = 6
+
     admin_email: str = "admin@za-company.com"
     admin_password: str = "change-me"
 

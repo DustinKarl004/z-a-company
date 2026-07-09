@@ -61,3 +61,10 @@ def update_count(db: Session, count: StockCount, *, quantity_remaining: float | 
     db.commit()
     db.refresh(count)
     return count
+
+
+def reassign_date(db: Session, count: StockCount, *, date_: date) -> StockCount:
+    count.date = date_
+    db.commit()
+    db.refresh(count)
+    return count

@@ -13,6 +13,7 @@ from app.crud.stock_deliveries import (
     get_delivery,
     get_delivery_for_day,
     list_deliveries,
+    reassign_date,
     update_delivery,
 )
 from app.crud.stock_items import get_stock_item
@@ -87,6 +88,17 @@ def update_delivery_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Delivery not found")
     if user.role == "staff" and user.branch_id and delivery.branch_id != user.branch_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your branch")
+
+    if payload.date is not None and payload.date != delivery.date:
+        if user.role != "admin":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admin can reassign the date")
+        conflict = get_delivery_for_day(
+            db, branch_id=delivery.branch_id, item_id=delivery.item_id, date_=payload.date
+        )
+        if conflict is not None and conflict.id != delivery.id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="An entry already exists for that date")
+        delivery = reassign_date(db, delivery, date_=payload.date)
+
     if payload.quantity_delivered is not None or payload.is_short is not None:
         ensure_editable(user, delivery.date)
 

@@ -14,6 +14,7 @@ class StockCountCreate(BaseModel):
 
 class StockCountUpdate(BaseModel):
     quantity_remaining: float | None = None
+    date: date_type | None = None
 
 
 class StockCountOut(BaseModel):

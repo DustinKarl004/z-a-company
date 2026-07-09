@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { ApiError } from "../api/client";
 import { listStockItems } from "../api/stockItems";
 import { createStockDelivery, listStockDeliveries, updateStockDelivery } from "../api/stockDeliveries";
@@ -9,21 +9,38 @@ import { useAuthStore } from "../stores/auth";
 import Icon from "../components/Icon.vue";
 import LoadingState from "../components/LoadingState.vue";
 import Modal from "../components/Modal.vue";
-import { toLocalISO, todayLocalISO } from "../utils/date";
+import { toLocalISO, todayLocalISO, businessDay, businessDayCutoffLabel, fetchBusinessToday } from "../utils/date";
 
 const auth = useAuthStore();
 
-const today = todayLocalISO();
-const yesterday = (() => {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  return toLocalISO(d);
-})();
-const todayLabel = new Date().toLocaleDateString(undefined, {
-  weekday: "long",
-  month: "long",
-  day: "numeric",
-});
+const today = ref(todayLocalISO());
+const yesterday = ref(
+  toLocalISO(
+    (() => {
+      const d = businessDay();
+      d.setDate(d.getDate() - 1);
+      return d;
+    })()
+  )
+);
+const todayLabel = ref(
+  businessDay().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })
+);
+const cutoffLabel = ref(businessDayCutoffLabel());
+
+let syncTimer = null;
+
+// The backend is the single source of truth for "what day is it" — this
+// avoids relying on the device's own clock/timezone near the cutoff boundary.
+async function syncBusinessDay() {
+  const { date, cutoffHour } = await fetchBusinessToday();
+  today.value = toLocalISO(date);
+  const y = new Date(date);
+  y.setDate(y.getDate() - 1);
+  yesterday.value = toLocalISO(y);
+  todayLabel.value = date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+  cutoffLabel.value = businessDayCutoffLabel(cutoffHour);
+}
 
 const categoryOrder = [
   "Meats",
@@ -119,10 +136,10 @@ async function refresh() {
   error.value = "";
   const [items, todayDeliveries, todayCounts, openingCounts, todaySales] = await Promise.all([
     listStockItems(),
-    listStockDeliveries({ date: today }),
-    listStockCounts({ date: today }),
-    listStockCounts({ date: yesterday }),
-    listSales({ date: today }),
+    listStockDeliveries({ date: today.value }),
+    listStockCounts({ date: today.value }),
+    listStockCounts({ date: yesterday.value }),
+    listSales({ date: today.value }),
   ]);
   stockItems.value = items;
 
@@ -167,7 +184,7 @@ async function saveTotalSale() {
     if (totalSale.id) {
       await updateTotalSale(totalSale.id, amount);
     } else {
-      const created = await createTotalSale({ date: today, amount });
+      const created = await createTotalSale({ date: today.value, amount });
       totalSale.id = created.id;
     }
     totalSale.editing = false;
@@ -258,7 +275,21 @@ async function submitAll() {
   }
 }
 
-onMounted(refresh);
+onMounted(async () => {
+  await syncBusinessDay();
+  await refresh();
+  syncTimer = setInterval(async () => {
+    const previousDay = today.value;
+    await syncBusinessDay();
+    if (today.value !== previousDay) {
+      await refresh();
+    }
+  }, 5 * 60 * 1000);
+});
+
+onUnmounted(() => {
+  if (syncTimer) clearInterval(syncTimer);
+});
 </script>
 
 <template>
@@ -269,6 +300,7 @@ onMounted(refresh);
         {{ todayLabel }}
         <span v-if="auth.branchName" class="branch-chip">{{ auth.branchName }}</span>
       </p>
+      <p class="page-subtitle cutoff-note">Today's log carries over until {{ cutoffLabel }}</p>
     </div>
     <span v-if="!loading" class="count-chip"><Icon name="count" :size="14" /> {{ loggedTodayCount }}/{{ stockItems.length }} logged today</span>
   </div>
@@ -432,6 +464,7 @@ onMounted(refresh);
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
+  flex-wrap: wrap;
   margin-bottom: 1.75rem;
 }
 
@@ -457,6 +490,12 @@ onMounted(refresh);
 .page-subtitle {
   color: var(--color-text-muted);
   margin: 0;
+}
+
+.cutoff-note {
+  font-size: 0.8rem;
+  opacity: 0.7;
+  margin-top: 0.15rem;
 }
 
 .top-error {
@@ -741,6 +780,11 @@ onMounted(refresh);
 }
 
 @media (max-width: 520px) {
+  .top-header > div {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
   .row-values {
     flex-wrap: wrap;
     gap: 0.85rem 1rem;

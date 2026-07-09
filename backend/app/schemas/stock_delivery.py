@@ -17,6 +17,7 @@ class StockDeliveryUpdate(BaseModel):
     quantity_delivered: float | None = None
     is_short: bool | None = None
     is_delivered: bool | None = None
+    date: date_type | None = None
 
 
 class StockDeliveryOut(BaseModel):
