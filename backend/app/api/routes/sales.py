@@ -9,6 +9,7 @@ from app.core.scoping import ensure_creatable_date, ensure_editable, resolve_bra
 from app.crud.branches import get_branch
 from app.crud.sales import (
     create_sale,
+    delete_sale,
     get_sale,
     get_total_sale_for_day,
     list_sales,
@@ -120,3 +121,18 @@ def update_sale_endpoint(
         db, sale, quantity_sold=payload.quantity_sold, amount=payload.quantity_sold * item.price
     )
     return SaleOut.model_validate(updated)
+
+
+@router.delete("/{sale_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_sale_endpoint(
+    sale_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_staff_or_admin),
+) -> None:
+    sale = get_sale(db, sale_id)
+    if sale is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sale not found")
+    if user.role == "staff" and sale.branch_id != user.branch_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your branch")
+    ensure_editable(user, sale.date)
+    delete_sale(db, sale)

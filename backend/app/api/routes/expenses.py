@@ -1,4 +1,4 @@
-from datetime import date as date_type
+from datetime import date as date_type, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -9,12 +9,14 @@ from app.core.deps import require_admin, require_admin_password
 from app.core.scoping import resolve_branch_id
 from app.crud.branches import get_branch
 from app.crud.expenses import (
+    carry_forward_expenses,
     create_expense,
     delete_expense,
     delete_month_data,
     get_expense,
     get_expense_for_day,
     list_expenses,
+    project_future_expenses,
     update_expense,
 )
 from app.models.user import User
@@ -54,7 +56,36 @@ def list_expenses_endpoint(
     date: date_type | None = None,
     db: Session = Depends(get_db),
 ) -> list[ExpenseOut]:
-    return [ExpenseOut.model_validate(e) for e in list_expenses(db, branch_id=branch_id, date_=date)]
+    today = local_today()
+    carried = set()
+    if date is not None and date == today:
+        carried = carry_forward_expenses(db, today=date, branch_id=branch_id)
+
+    result = []
+    for e in list_expenses(db, branch_id=branch_id, date_=date):
+        out = ExpenseOut.model_validate(e)
+        out.is_carried_forward = e.branch_id in carried
+        result.append(out)
+
+    if date is not None and date == today + timedelta(days=1):
+        covered = {e.branch_id for e in result}
+        for bid, latest in project_future_expenses(
+            db, date_=date, branch_id=branch_id, exclude_branch_ids=covered
+        ):
+            result.append(
+                ExpenseOut(
+                    id=f"projected:{latest.id}",
+                    branch_id=bid,
+                    date=date,
+                    description=latest.description,
+                    amount=latest.amount,
+                    created_by_id=latest.created_by_id,
+                    created_at=latest.created_at,
+                    is_projected=True,
+                )
+            )
+
+    return result
 
 
 @router.delete("/month", status_code=204)
@@ -75,9 +106,7 @@ def delete_month_data_endpoint(
 
 
 @router.delete("/{expense_id}", status_code=204)
-def delete_expense_endpoint(
-    expense_id: str, db: Session = Depends(get_db), _: object = Depends(require_admin_password)
-) -> None:
+def delete_expense_endpoint(expense_id: str, db: Session = Depends(get_db)) -> None:
     expense = get_expense(db, expense_id)
     if expense is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Expense not found")

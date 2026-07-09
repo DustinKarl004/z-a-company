@@ -11,8 +11,8 @@ export function createExpense({ branchId, date, description, amount }) {
   });
 }
 
-export function deleteExpense(id, password) {
-  return apiFetch(`/expenses/${id}`, { method: "DELETE", body: { password } });
+export function deleteExpense(id) {
+  return apiFetch(`/expenses/${id}`, { method: "DELETE" });
 }
 
 export function deleteMonthData(year, month, password) {

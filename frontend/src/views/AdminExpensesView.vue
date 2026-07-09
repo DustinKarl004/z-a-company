@@ -3,24 +3,35 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import * as XLSX from "xlsx-js-style";
 import { listBranches } from "../api/branches";
 import { ApiError } from "../api/client";
-import { createExpense, deleteMonthData, listExpenses } from "../api/expenses";
-import { createTotalSale, listSales, updateTotalSale } from "../api/sales";
+import { createExpense, deleteExpense, deleteMonthData, listExpenses } from "../api/expenses";
+import { createTotalSale, deleteSale, listSales, updateTotalSale } from "../api/sales";
 import { listStockItems } from "../api/stockItems";
-import { createStockCount, listStockCounts, updateStockCount } from "../api/stockCounts";
-import { createStockDelivery, listStockDeliveries, updateStockDelivery } from "../api/stockDeliveries";
+import { createStockCount, deleteStockCount, listStockCounts, updateStockCount } from "../api/stockCounts";
+import {
+  createStockDelivery,
+  deleteStockDelivery,
+  listStockDeliveries,
+  updateStockDelivery,
+} from "../api/stockDeliveries";
 import ConfirmDeleteModal from "../components/ConfirmDeleteModal.vue";
 import ConfirmModal from "../components/ConfirmModal.vue";
 import CustomSelect from "../components/CustomSelect.vue";
 import Icon from "../components/Icon.vue";
 import LoadingState from "../components/LoadingState.vue";
 import Modal from "../components/Modal.vue";
-import { todayLocalISO } from "../utils/date";
+import { fetchBusinessToday, toLocalISO, todayLocalISO } from "../utils/date";
 
 const today = todayLocalISO();
+console.log("[AdminExpenses] device-guessed today (before server sync):", today);
 
 const branches = ref([]);
 const selectedDate = ref(today);
 const selectedBranchId = ref("");
+// The real "today" per the server (Asia/Manila) — used to tell apart clearing
+// today's locked-in bill (must stay explicitly "no bill", never resurrected
+// by carry-forward) from clearing a future preview day (should fall back to
+// showing the preview again, so it's fully deleted instead).
+const serverToday = ref(today);
 
 const expenses = ref([]);
 const sales = ref([]);
@@ -44,14 +55,29 @@ function peso(amount) {
 }
 
 const totalSales = computed(() => sales.value.reduce((sum, s) => sum + s.amount, 0));
-const totalBills = computed(() => expenses.value.reduce((sum, e) => sum + e.amount, 0));
+const totalBills = computed(() =>
+  expenses.value.reduce((sum, e) => (e.is_projected ? sum : sum + (e.amount || 0)), 0)
+);
+
+// A future date is just a preview (nothing saved yet) — inputs are disabled
+// so nobody can accidentally lock in a value for a day that hasn't arrived.
+const isFutureDate = computed(() => selectedDate.value > serverToday.value);
 
 const billRows = reactive({});
 const salesRows = reactive({});
 
 function billRowFor(branchId) {
   if (!billRows[branchId]) {
-    billRows[branchId] = { id: null, amount: "", saving: false, saved: false, error: "", editing: false };
+    billRows[branchId] = {
+      id: null,
+      amount: "",
+      saving: false,
+      saved: false,
+      error: "",
+      editing: false,
+      carriedForward: false,
+      projected: false,
+    };
   }
   return billRows[branchId];
 }
@@ -73,10 +99,25 @@ function flashSaved(row) {
 async function saveBill(branchId) {
   const row = billRowFor(branchId);
   row.error = "";
-  if (Number.isNaN(Number(row.amount))) return;
-  const amount = row.amount === "" ? 0 : Number(row.amount);
+  if (Number.isNaN(Number(row.amount)) && row.amount !== "") return;
+  if (row.amount === "" && !row.id) {
+    row.editing = false;
+    flashSaved(row);
+    return;
+  }
   row.saving = true;
   try {
+    if (row.amount === "" && selectedDate.value !== serverToday.value) {
+      // Not today — no carry-forward resurrection risk here, so fully delete
+      // instead of nulling, then re-fetch so a future date falls back to
+      // showing its preview again instead of staying blank.
+      await deleteExpense(row.id);
+      row.editing = false;
+      await refresh();
+      flashSaved(billRowFor(branchId));
+      return;
+    }
+    const amount = row.amount === "" ? null : Number(row.amount);
     const result = await createExpense({
       branchId,
       date: selectedDate.value,
@@ -84,6 +125,8 @@ async function saveBill(branchId) {
       amount,
     });
     row.id = result.id;
+    row.carriedForward = false;
+    row.projected = false;
     row.editing = false;
     const idx = expenses.value.findIndex((e) => e.branch_id === branchId);
     if (idx !== -1) {
@@ -103,9 +146,20 @@ async function saveSales(branchId) {
   const row = salesRowFor(branchId);
   row.error = "";
   if (Number.isNaN(Number(row.amount))) return;
-  const amount = row.amount === "" ? 0 : Number(row.amount);
   row.saving = true;
   try {
+    if (row.amount === "") {
+      if (row.id) {
+        await deleteSale(row.id);
+        const idx = sales.value.findIndex((s) => s.branch_id === branchId && s.item_id === null);
+        if (idx !== -1) sales.value.splice(idx, 1);
+      }
+      row.id = null;
+      row.editing = false;
+      flashSaved(row);
+      return;
+    }
+    const amount = Number(row.amount);
     let result;
     if (row.id) {
       result = await updateTotalSale(row.id, amount);
@@ -136,20 +190,34 @@ async function refresh() {
   error.value = "";
   const params = { date: selectedDate.value };
   if (selectedBranchId.value) params.branch_id = selectedBranchId.value;
+  console.log("[AdminExpenses] refresh() fetching expenses/sales with params:", params);
   try {
     [expenses.value, sales.value] = await Promise.all([listExpenses(params), listSales(params)]);
+    console.log(
+      "[AdminExpenses] expenses received:",
+      expenses.value.map((e) => ({
+        branch_id: e.branch_id,
+        amount: e.amount,
+        is_carried_forward: e.is_carried_forward,
+        is_projected: e.is_projected,
+      }))
+    );
     for (const b of branches.value) {
       const bill = billRowFor(b.id);
       bill.id = null;
       bill.amount = "";
+      bill.carriedForward = false;
+      bill.projected = false;
       const salesRow = salesRowFor(b.id);
       salesRow.id = null;
       salesRow.amount = "";
     }
     for (const e of expenses.value) {
       const row = billRowFor(e.branch_id);
-      row.id = e.id;
-      row.amount = String(e.amount);
+      row.id = e.is_projected ? null : e.id;
+      row.amount = e.amount === null ? "" : String(e.amount);
+      row.carriedForward = !!e.is_carried_forward;
+      row.projected = !!e.is_projected;
     }
     for (const s of sales.value) {
       if (s.item_id !== null) continue;
@@ -260,19 +328,26 @@ async function saveStockDelivery(branchId, itemId) {
   const row = stockRowFor(branchId, itemId);
   row.deliveryError = "";
   if (Number.isNaN(Number(row.delivery))) return;
-  const quantity = row.delivery === "" ? 0 : Number(row.delivery);
   row.deliverySaving = true;
   try {
-    if (row.deliveryId) {
-      await updateStockDelivery(row.deliveryId, { quantity_delivered: quantity });
+    if (row.delivery === "") {
+      if (row.deliveryId) {
+        await deleteStockDelivery(row.deliveryId);
+        row.deliveryId = null;
+      }
     } else {
-      const created = await createStockDelivery({
-        branchId,
-        itemId,
-        quantityDelivered: quantity,
-        date: selectedDate.value,
-      });
-      row.deliveryId = created.id;
+      const quantity = Number(row.delivery);
+      if (row.deliveryId) {
+        await updateStockDelivery(row.deliveryId, { quantity_delivered: quantity });
+      } else {
+        const created = await createStockDelivery({
+          branchId,
+          itemId,
+          quantityDelivered: quantity,
+          date: selectedDate.value,
+        });
+        row.deliveryId = created.id;
+      }
     }
     row.deliverySaved = true;
     setTimeout(() => {
@@ -289,19 +364,26 @@ async function saveStockClosing(branchId, itemId) {
   const row = stockRowFor(branchId, itemId);
   row.closingError = "";
   if (Number.isNaN(Number(row.closing))) return;
-  const quantity = row.closing === "" ? 0 : Number(row.closing);
   row.closingSaving = true;
   try {
-    if (row.closingId) {
-      await updateStockCount(row.closingId, { quantity_remaining: quantity });
+    if (row.closing === "") {
+      if (row.closingId) {
+        await deleteStockCount(row.closingId);
+        row.closingId = null;
+      }
     } else {
-      const created = await createStockCount({
-        branchId,
-        itemId,
-        quantityRemaining: quantity,
-        date: selectedDate.value,
-      });
-      row.closingId = created.id;
+      const quantity = Number(row.closing);
+      if (row.closingId) {
+        await updateStockCount(row.closingId, { quantity_remaining: quantity });
+      } else {
+        const created = await createStockCount({
+          branchId,
+          itemId,
+          quantityRemaining: quantity,
+          date: selectedDate.value,
+        });
+        row.closingId = created.id;
+      }
     }
     row.closingSaved = true;
     setTimeout(() => {
@@ -402,12 +484,18 @@ const stockExpenseByBranch = computed(() => {
     if (!groups.has(row.branchId)) groups.set(row.branchId, []);
     groups.get(row.branchId).push(row);
   }
-  return [...groups.entries()].map(([branchId, rows]) => ({
-    branchId,
-    name: branchName(branchId),
-    rows: sortRows(rows),
-    total: rows.reduce((sum, r) => sum + (r.expense || 0), 0),
-  }));
+  return [...groups.entries()].map(([branchId, rows]) => {
+    const total = rows.reduce((sum, r) => sum + (r.expense || 0), 0);
+    const sales = Number(salesRowFor(branchId).amount) || 0;
+    const bills = billRowFor(branchId).projected ? 0 : Number(billRowFor(branchId).amount) || 0;
+    return {
+      branchId,
+      name: branchName(branchId),
+      rows: sortRows(rows),
+      total,
+      grandTotal: sales - (total + bills),
+    };
+  });
 });
 
 
@@ -417,7 +505,7 @@ const exportBranchSummaries = computed(() => {
     : branches.value;
   return relevantBranches.map((b) => {
     const sales = Number(salesRowFor(b.id).amount) || 0;
-    const bills = Number(billRowFor(b.id).amount) || 0;
+    const bills = billRowFor(b.id).projected ? 0 : Number(billRowFor(b.id).amount) || 0;
     const stockExpense = stockExpenseByBranch.value.find((g) => g.branchId === b.id)?.total || 0;
     const totalExpense = bills + stockExpense;
     return {
@@ -874,6 +962,26 @@ async function exportToExcel() {
 
 onMounted(async () => {
   branches.value = await listBranches();
+
+  // The backend (Asia/Manila) is the source of truth for "what day is it" —
+  // this avoids relying on the device's own clock/timezone, which is what
+  // was silently breaking the daily-bills carry-forward (it only kicks in
+  // when the requested date exactly matches the server's business day).
+  const wasOnToday = selectedDate.value === today;
+  const { date: serverToday } = await fetchBusinessToday();
+  const serverTodayISO = toLocalISO(serverToday);
+  console.log("[AdminExpenses] server business-day today:", serverTodayISO);
+  serverToday.value = serverTodayISO;
+  if (wasOnToday && serverTodayISO !== selectedDate.value) {
+    console.log(
+      "[AdminExpenses] correcting selectedDate from device guess to server date:",
+      selectedDate.value,
+      "->",
+      serverTodayISO
+    );
+    selectedDate.value = serverTodayISO;
+  }
+
   await Promise.all([refresh(), refreshStockExpense()]);
 });
 
@@ -966,6 +1074,10 @@ watch([selectedDate, selectedBranchId], () => {
       <span class="stat-label">Total expense (incl. bills)</span>
       <span class="stat-value">{{ peso(grandTotalExpense) }}</span>
     </div>
+    <div class="card stat-card">
+      <span class="stat-label">Daily bills</span>
+      <span class="stat-value">{{ peso(totalBills) }}</span>
+    </div>
     <div class="card stat-card" :class="{ 'stat-card-alert': dailyProfit < 0, 'stat-card-positive': dailyProfit >= 0 }">
       <span class="stat-label">Daily Profit</span>
       <span class="stat-value">{{ dailyProfit >= 0 ? "+" : "" }}{{ peso(dailyProfit) }}</span>
@@ -995,39 +1107,47 @@ watch([selectedDate, selectedBranchId], () => {
             <Icon name="chevron-right" :size="16" />
           </button>
           <h3 class="branch-group-name">{{ group.name }}</h3>
-          <span class="branch-group-total">
-            {{ peso(group.total + (Number(billRowFor(group.branchId).amount) || 0)) }}
-          </span>
+          <div class="daily-bills-inline">
+            <span class="daily-bills-title">Stock expense</span>
+            <span class="branch-group-total">{{ peso(group.total) }}</span>
+          </div>
 
           <div class="daily-bills-inline">
             <span class="daily-bills-title">Sales</span>
 
             <template v-if="!salesRowFor(group.branchId).id || salesRowFor(group.branchId).editing">
-              <span class="unit-label">₱</span>
-              <input
-                type="number"
-                inputmode="decimal"
-                min="0"
-                step="any"
-                class="value-input"
-                :class="{ saved: salesRowFor(group.branchId).saved }"
-                placeholder="0"
-                v-model="salesRowFor(group.branchId).amount"
-                @blur="saveSales(group.branchId)"
-                @keyup.enter="($event.target).blur()"
-              />
-              <span v-if="salesRowFor(group.branchId).saving" class="save-status">Saving...</span>
+              <div class="daily-bills-value-row">
+                <span class="unit-label">₱</span>
+                <input
+                  type="number"
+                  inputmode="decimal"
+                  min="0"
+                  step="any"
+                  class="value-input"
+                  :class="{ saved: salesRowFor(group.branchId).saved }"
+                  placeholder="0"
+                  :disabled="isFutureDate"
+                  v-model="salesRowFor(group.branchId).amount"
+                  @blur="saveSales(group.branchId)"
+                  @keyup.enter="($event.target).blur()"
+                />
+                <span v-if="salesRowFor(group.branchId).saving" class="save-status">Saving...</span>
+              </div>
             </template>
             <template v-else>
-              <button
-                type="button"
-                class="edit-bill-btn"
-                title="Edit sales"
-                aria-label="Edit sales"
-                @click="salesRowFor(group.branchId).editing = true"
-              >
-                <Icon name="edit" :size="12" />
-              </button>
+              <div class="daily-bills-value-row">
+                <span class="daily-bills-value">{{ peso(Number(salesRowFor(group.branchId).amount) || 0) }}</span>
+                <button
+                  type="button"
+                  class="edit-bill-btn"
+                  title="Edit sales"
+                  aria-label="Edit sales"
+                  :disabled="isFutureDate"
+                  @click="salesRowFor(group.branchId).editing = true"
+                >
+                  <Icon name="edit" :size="12" />
+                </button>
+              </div>
             </template>
           </div>
           <p v-if="salesRowFor(group.branchId).error" class="row-error">{{ salesRowFor(group.branchId).error }}</p>
@@ -1036,32 +1156,57 @@ watch([selectedDate, selectedBranchId], () => {
             <span class="daily-bills-title">Daily bills</span>
 
             <template v-if="!billRowFor(group.branchId).id || billRowFor(group.branchId).editing">
-              <span class="unit-label">₱</span>
-              <input
-                type="number"
-                inputmode="decimal"
-                min="0"
-                step="any"
-                class="value-input"
-                :class="{ saved: billRowFor(group.branchId).saved }"
-                placeholder="0"
-                v-model="billRowFor(group.branchId).amount"
-                @blur="saveBill(group.branchId)"
-                @keyup.enter="($event.target).blur()"
-              />
-              <span v-if="billRowFor(group.branchId).saving" class="save-status">Saving...</span>
+              <div class="daily-bills-value-row">
+                <span class="unit-label">₱</span>
+                <input
+                  type="number"
+                  inputmode="decimal"
+                  min="0"
+                  step="any"
+                  class="value-input"
+                  :class="{ saved: billRowFor(group.branchId).saved }"
+                  placeholder="0"
+                  :disabled="isFutureDate"
+                  v-model="billRowFor(group.branchId).amount"
+                  @blur="saveBill(group.branchId)"
+                  @keyup.enter="($event.target).blur()"
+                />
+                <span v-if="billRowFor(group.branchId).saving" class="save-status">Saving...</span>
+                <span v-else-if="billRowFor(group.branchId).projected" class="save-status carried-badge"
+                  >preview — not yet saved</span
+                >
+              </div>
             </template>
             <template v-else>
-              <button
-                type="button"
-                class="edit-bill-btn"
-                title="Edit daily bills"
-                aria-label="Edit daily bills"
-                @click="billRowFor(group.branchId).editing = true"
-              >
-                <Icon name="edit" :size="12" />
-              </button>
+              <div class="daily-bills-value-row">
+                <span class="daily-bills-value">{{
+                  billRowFor(group.branchId).amount === "" ? "—" : peso(Number(billRowFor(group.branchId).amount))
+                }}</span>
+                <span v-if="billRowFor(group.branchId).carriedForward" class="save-status carried-badge"
+                  >carried from yesterday</span
+                >
+                <button
+                  type="button"
+                  class="edit-bill-btn"
+                  title="Edit daily bills"
+                  aria-label="Edit daily bills"
+                  :disabled="isFutureDate"
+                  @click="billRowFor(group.branchId).editing = true"
+                >
+                  <Icon name="edit" :size="12" />
+                </button>
+              </div>
             </template>
+          </div>
+
+          <div class="daily-bills-inline">
+            <span class="daily-bills-title">Grand total</span>
+            <span
+              class="branch-group-total"
+              :class="{ 'total-negative': group.grandTotal < 0, 'total-positive': group.grandTotal >= 0 }"
+            >
+              {{ group.grandTotal >= 0 ? "+" : "" }}{{ peso(group.grandTotal) }}
+            </span>
           </div>
         </div>
         <p v-if="billRowFor(group.branchId).error" class="row-error">{{ billRowFor(group.branchId).error }}</p>
@@ -1105,6 +1250,7 @@ watch([selectedDate, selectedBranchId], () => {
                     class="value-input table-input"
                     :class="{ saved: row.row.deliverySaved }"
                     placeholder="0"
+                    :disabled="isFutureDate"
                     v-model="row.row.delivery"
                     @blur="saveStockDelivery(row.branchId, row.itemId)"
                     @keyup.enter="($event.target).blur()"
@@ -1122,6 +1268,7 @@ watch([selectedDate, selectedBranchId], () => {
                       class="value-input table-input"
                       :class="{ saved: row.row.closingSaved }"
                       placeholder="0"
+                      :disabled="isFutureDate"
                       v-model="row.row.closing"
                       @blur="saveStockClosing(row.branchId, row.itemId)"
                       @keyup.enter="($event.target).blur()"
@@ -1131,6 +1278,7 @@ watch([selectedDate, selectedBranchId], () => {
                       class="same-as-opening-btn"
                       title="Same as opening"
                       aria-label="Set closing same as opening"
+                      :disabled="isFutureDate"
                       @click="useOpeningAsClosing(row.branchId, row.itemId)"
                     >
                       <Icon name="equal" :size="14" />
@@ -1361,7 +1509,7 @@ watch([selectedDate, selectedBranchId], () => {
 
 .stat-row {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 1rem;
   margin-bottom: 1.5rem;
 }
@@ -1504,13 +1652,33 @@ watch([selectedDate, selectedBranchId], () => {
 
 .daily-bills-inline {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+}
+
+.daily-bills-value-row {
+  display: flex;
   align-items: center;
   gap: 0.4rem;
+}
+
+.daily-bills-value {
+  font-weight: 600;
+  color: var(--color-text);
 }
 
 .branch-group-total {
   font-weight: 700;
   color: var(--color-primary);
+}
+
+.branch-group-total.total-positive {
+  color: var(--color-success, #2e7d32);
+}
+
+.branch-group-total.total-negative {
+  color: var(--color-danger);
 }
 
 .table-scroll {
@@ -1603,6 +1771,13 @@ watch([selectedDate, selectedBranchId], () => {
   transition: border-color 0.3s;
 }
 
+.value-input:disabled,
+.edit-bill-btn:disabled,
+.same-as-opening-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .table-input {
   width: 90px;
 }
@@ -1638,6 +1813,10 @@ watch([selectedDate, selectedBranchId], () => {
 .save-status {
   font-size: 0.8rem;
   color: var(--color-text-muted);
+}
+
+.carried-badge {
+  font-style: italic;
 }
 
 @media (max-width: 560px) {

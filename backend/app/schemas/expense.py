@@ -9,7 +9,7 @@ class ExpenseCreate(BaseModel):
     branch_id: str | None = None
     date: date_type = Field(default_factory=local_today)
     description: str
-    amount: float
+    amount: float | None = None
 
 
 class ExpenseOut(BaseModel):
@@ -19,6 +19,8 @@ class ExpenseOut(BaseModel):
     branch_id: str
     date: date_type
     description: str
-    amount: float
+    amount: float | None
     created_by_id: str
     created_at: datetime
+    is_carried_forward: bool = False
+    is_projected: bool = False

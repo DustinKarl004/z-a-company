@@ -25,3 +25,7 @@ export function createTotalSale({ branchId, date, amount }) {
 export function updateTotalSale(id, amount) {
   return apiFetch(`/sales/${id}`, { method: "PATCH", body: { amount } });
 }
+
+export function deleteSale(id) {
+  return apiFetch(`/sales/${id}`, { method: "DELETE" });
+}

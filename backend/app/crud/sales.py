@@ -66,6 +66,11 @@ def update_sale_amount(db: Session, sale: Sale, *, amount: float) -> Sale:
     return sale
 
 
+def delete_sale(db: Session, sale: Sale) -> None:
+    db.delete(sale)
+    db.commit()
+
+
 def reassign_date(db: Session, sale: Sale, *, date_: date) -> Sale:
     sale.date = date_
     db.commit()

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 
 def test_expenses_admin_only(client, staff_token):
@@ -34,6 +34,157 @@ def test_create_and_list_expense(client, admin_token, branch):
     listed = resp.json()
     assert len(listed) == 1
     assert listed[0]["id"] == body["id"]
+
+
+def test_expense_carries_forward_to_next_day(client, admin_token, branch):
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+
+    client.post(
+        "/expenses",
+        json={"branch_id": branch.id, "description": "Daily bills", "amount": 150.0, "date": yesterday},
+        headers=admin_headers,
+    )
+
+    resp = client.get("/expenses", params={"date": date.today().isoformat()}, headers=admin_headers)
+    assert resp.status_code == 200
+    listed = resp.json()
+    assert len(listed) == 1
+    assert listed[0]["branch_id"] == branch.id
+    assert listed[0]["amount"] == 150.0
+    assert listed[0]["date"] == date.today().isoformat()
+    assert listed[0]["is_carried_forward"] is True
+
+
+def test_expense_carry_forward_does_not_overwrite_own_entry(client, admin_token, branch):
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+
+    client.post(
+        "/expenses",
+        json={"branch_id": branch.id, "description": "Daily bills", "amount": 150.0, "date": yesterday},
+        headers=admin_headers,
+    )
+    client.post(
+        "/expenses",
+        json={"branch_id": branch.id, "description": "Daily bills", "amount": 200.0, "date": date.today().isoformat()},
+        headers=admin_headers,
+    )
+
+    resp = client.get("/expenses", params={"date": date.today().isoformat()}, headers=admin_headers)
+    listed = resp.json()
+    assert len(listed) == 1
+    assert listed[0]["amount"] == 200.0
+    assert listed[0]["is_carried_forward"] is False
+
+
+def test_expense_carry_forward_does_not_save_future_dates(client, admin_token, branch):
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    client.post(
+        "/expenses",
+        json={"branch_id": branch.id, "description": "Daily bills", "amount": 150.0, "date": date.today().isoformat()},
+        headers=admin_headers,
+    )
+
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    resp = client.get("/expenses", params={"date": tomorrow}, headers=admin_headers)
+    assert resp.status_code == 200
+    listed = resp.json()
+    assert len(listed) == 1
+    assert listed[0]["is_projected"] is True
+    assert listed[0]["amount"] == 150.0
+    assert listed[0]["date"] == tomorrow
+
+    resp = client.get("/expenses", headers=admin_headers)
+    assert len(resp.json()) == 1
+
+
+def test_future_projection_defers_to_real_entry(client, admin_token, branch):
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    client.post(
+        "/expenses",
+        json={"branch_id": branch.id, "description": "Daily bills", "amount": 150.0, "date": date.today().isoformat()},
+        headers=admin_headers,
+    )
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    client.post(
+        "/expenses",
+        json={"branch_id": branch.id, "description": "Daily bills", "amount": 999.0, "date": tomorrow},
+        headers=admin_headers,
+    )
+
+    resp = client.get("/expenses", params={"date": tomorrow}, headers=admin_headers)
+    listed = resp.json()
+    assert len(listed) == 1
+    assert listed[0]["amount"] == 999.0
+    assert listed[0].get("is_projected", False) is False
+
+
+def test_future_projection_only_covers_tomorrow_not_further_out(client, admin_token, branch):
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    client.post(
+        "/expenses",
+        json={"branch_id": branch.id, "description": "Daily bills", "amount": 150.0, "date": date.today().isoformat()},
+        headers=admin_headers,
+    )
+
+    day_after_tomorrow = (date.today() + timedelta(days=2)).isoformat()
+    resp = client.get("/expenses", params={"date": day_after_tomorrow}, headers=admin_headers)
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_future_projection_has_no_entry_when_nothing_entered_yet(client, admin_token, branch2):
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    resp = client.get("/expenses", params={"branch_id": branch2.id, "date": tomorrow}, headers=admin_headers)
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_clearing_a_bill_is_not_resurrected_by_carry_forward(client, admin_token, branch):
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+
+    client.post(
+        "/expenses",
+        json={"branch_id": branch.id, "description": "Daily bills", "amount": 150.0, "date": yesterday},
+        headers=admin_headers,
+    )
+    resp = client.get("/expenses", params={"date": date.today().isoformat()}, headers=admin_headers)
+    today_id = resp.json()[0]["id"]
+
+    resp = client.post(
+        "/expenses",
+        json={"branch_id": branch.id, "description": "Daily bills", "amount": None},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 201
+    assert resp.json()["amount"] is None
+    assert resp.json()["id"] == today_id
+
+    resp = client.get("/expenses", params={"date": date.today().isoformat()}, headers=admin_headers)
+    listed = resp.json()
+    assert len(listed) == 1
+    assert listed[0]["amount"] is None
+    assert listed[0]["id"] == today_id
+    assert listed[0]["is_carried_forward"] is False
+
+
+def test_cleared_bill_carries_forward_as_cleared(client, admin_token, branch):
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+
+    client.post(
+        "/expenses",
+        json={"branch_id": branch.id, "description": "Daily bills", "amount": None, "date": yesterday},
+        headers=admin_headers,
+    )
+
+    resp = client.get("/expenses", params={"date": date.today().isoformat()}, headers=admin_headers)
+    listed = resp.json()
+    assert len(listed) == 1
+    assert listed[0]["amount"] is None
 
 
 def test_create_expense_requires_branch_id(client, admin_token):
@@ -191,7 +342,7 @@ def test_delete_month_data_requires_correct_password(client, admin_token, branch
     assert len(resp.json()) == 1
 
 
-def test_delete_expense_requires_correct_password(client, admin_token, branch):
+def test_delete_expense_does_not_require_password(client, admin_token, branch):
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
     resp = client.post(
         "/expenses",
@@ -200,7 +351,5 @@ def test_delete_expense_requires_correct_password(client, admin_token, branch):
     )
     expense_id = resp.json()["id"]
 
-    resp = client.request(
-        "DELETE", f"/expenses/{expense_id}", json={"password": "wrongpass"}, headers=admin_headers
-    )
-    assert resp.status_code == 401
+    resp = client.request("DELETE", f"/expenses/{expense_id}", headers=admin_headers)
+    assert resp.status_code == 204
