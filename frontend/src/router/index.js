@@ -12,6 +12,7 @@ import AdminSettingsView from "../views/AdminSettingsView.vue";
 import StaffLayout from "../views/StaffLayout.vue";
 import StaffDeliveriesView from "../views/StaffDeliveriesView.vue";
 import StaffDeliveryLogView from "../views/StaffDeliveryLogView.vue";
+import StaffStockRecordsView from "../views/StaffStockRecordsView.vue";
 import NotFoundView from "../views/NotFoundView.vue";
 
 function defaultStaffRoute(auth) {
@@ -54,6 +55,12 @@ const routes = [
         path: "delivery-log",
         name: "staff-delivery-log",
         component: StaffDeliveryLogView,
+        meta: { requiresStaffRole: "delivery" },
+      },
+      {
+        path: "stock-records",
+        name: "staff-stock-records",
+        component: StaffStockRecordsView,
         meta: { requiresStaffRole: "delivery" },
       },
     ],

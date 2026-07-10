@@ -2,11 +2,14 @@
 import { computed } from "vue";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "../stores/auth";
+import Icon from "../components/Icon.vue";
 
 const auth = useAuthStore();
 const router = useRouter();
 
-const showTabs = computed(() => auth.staffRoles.length > 1);
+// "delivery" staff always get two tabs (Delivery + Stock Records) even when
+// it's their only role, so tab visibility can't just check role count.
+const showTabs = computed(() => auth.staffRoles.length > 1 || auth.staffRoles.includes("delivery"));
 
 function onLogout() {
   auth.logout();
@@ -42,7 +45,7 @@ function onLogout() {
         class="staff-tab"
         active-class="active"
       >
-        Daily Stock
+        <Icon name="stock" :size="16" /><span>Daily Stock</span>
       </router-link>
       <router-link
         v-if="auth.staffRoles.includes('delivery')"
@@ -50,7 +53,15 @@ function onLogout() {
         class="staff-tab"
         active-class="active"
       >
-        Delivery
+        <Icon name="truck" :size="16" /><span>Delivery</span>
+      </router-link>
+      <router-link
+        v-if="auth.staffRoles.includes('delivery')"
+        :to="{ name: 'staff-stock-records' }"
+        class="staff-tab"
+        active-class="active"
+      >
+        <Icon name="list" :size="16" /><span>Stock Records</span>
       </router-link>
     </nav>
 
@@ -136,27 +147,38 @@ function onLogout() {
 
 .staff-tabs {
   display: flex;
-  gap: 0.5rem;
+  gap: 0;
   padding: 0.75rem 1.5rem 0;
   max-width: 1100px;
   margin: 0 auto;
   width: 100%;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .staff-tab {
-  padding: 0.5rem 1rem;
-  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 1.1rem;
+  margin-bottom: -1px;
+  border-radius: 0;
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--color-text-muted);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  text-decoration: none;
+}
+
+.staff-tab:hover:not(.active) {
+  color: var(--color-text);
 }
 
 .staff-tab.active {
-  color: #fff;
-  background: var(--gradient-primary);
-  border-color: transparent;
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+  border-bottom-color: var(--color-primary);
 }
 
 .staff-content {
@@ -170,10 +192,51 @@ function onLogout() {
 @media (max-width: 720px) {
   .staff-content {
     padding: 1.25rem 1rem;
+    /* Leave room for the fixed bottom tab bar below, plus the device's
+       home-indicator safe area, so content never sits underneath it. */
+    padding-bottom: calc(1.25rem + 64px + env(safe-area-inset-bottom));
   }
 
   .brand-subtitle {
     display: none;
+  }
+
+  .staff-tabs {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    max-width: none;
+    margin: 0;
+    gap: 0;
+    padding: 0.4rem 0.5rem calc(0.4rem + env(safe-area-inset-bottom));
+    background: var(--glass-bg);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border-top: 1px solid rgba(255, 84, 112, 0.2);
+    border-bottom: none;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.35);
+    z-index: 50;
+  }
+
+  .staff-tab {
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.2rem;
+    text-align: center;
+    padding: 0.5rem 0.4rem;
+    margin-bottom: 0;
+    border-radius: 10px;
+    border: none;
+    border-bottom: none;
+    background: transparent;
+    font-size: 0.7rem;
+  }
+
+  .staff-tab.active {
+    color: #fff;
+    background: var(--gradient-primary);
   }
 }
 </style>
