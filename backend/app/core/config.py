@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     # Defaults to "*" for local dev; set explicitly in production.
     cors_origins: str = "*"
 
+    # Enables /docs, /redoc, and /openapi.json. Off by default so the API schema
+    # isn't publicly browsable in production; turn on for local dev only.
+    debug: bool = False
+
     @property
     def sqlalchemy_database_url(self) -> str:
         # Some hosts (Railway, old Heroku) hand out "postgres://" — SQLAlchemy 2.x requires "postgresql://".
