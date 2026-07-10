@@ -412,8 +412,7 @@ onUnmounted(() => {
     <div v-else class="stock-list">
       <div v-for="item in filteredItems" :key="item.id" class="stock-row">
         <div class="row-main">
-          <span class="item-name">{{ item.name }}</span>
-          <span v-if="item.unit" class="unit-chip">{{ item.unit }}</span>
+          <span class="item-name">{{ item.name }} <span v-if="item.unit" class="item-unit">{{ item.unit }}</span></span>
           <span v-if="item.category" class="category-chip">{{ item.category }}</span>
         </div>
 
@@ -695,15 +694,9 @@ onUnmounted(() => {
   color: var(--color-text);
 }
 
-.unit-chip {
-  flex-shrink: 0;
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
-  font-size: 0.72rem;
-  font-weight: 600;
-  padding: 0.2rem 0.55rem;
-  border-radius: 999px;
-  white-space: nowrap;
+.item-unit {
+  color: var(--color-danger);
+  font-size: 0.8em;
 }
 
 .category-chip {

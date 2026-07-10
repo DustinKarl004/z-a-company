@@ -47,6 +47,10 @@ function itemName(id) {
   return stockItems.value.find((i) => i.id === id)?.name || "—";
 }
 
+function itemUnit(id) {
+  return stockItems.value.find((i) => i.id === id)?.unit || "";
+}
+
 function groupByBranch(needs) {
   const groups = new Map();
   for (const n of needs) {
@@ -224,7 +228,9 @@ onMounted(refresh);
                     :disabled="savingIds.has(n.id)"
                     @change="toggleNeed(n)"
                   />
-                  <span class="item-name">{{ itemName(n.item_id) }}</span>
+                  <span class="item-name"
+                    >{{ itemName(n.item_id) }} <span v-if="itemUnit(n.item_id)" class="item-unit">{{ itemUnit(n.item_id) }}</span></span
+                  >
                 </label>
                 <span class="delivered-badge" :class="{ done: n.is_delivered }">
                   {{ n.is_delivered ? "Delivered" : "Pending" }}
@@ -504,6 +510,11 @@ onMounted(refresh);
 
 .need-item.delivered .item-name {
   text-decoration: line-through;
+}
+
+.item-unit {
+  color: var(--color-danger);
+  font-size: 0.8em;
 }
 
 .delivered-badge {

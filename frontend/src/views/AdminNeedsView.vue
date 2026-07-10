@@ -43,6 +43,10 @@ function itemName(id) {
   return stockItems.value.find((i) => i.id === id)?.name || "—";
 }
 
+function itemUnit(id) {
+  return stockItems.value.find((i) => i.id === id)?.unit || "";
+}
+
 function groupByBranch(needs) {
   const groups = new Map();
   for (const n of needs) {
@@ -155,7 +159,9 @@ onMounted(async () => {
             <ul class="need-items">
               <li v-for="n in group.items" :key="n.id" class="need-item" :class="{ delivered: n.is_delivered }">
                 <Icon :name="n.is_delivered ? 'check' : 'alert'" :size="13" class="need-icon" />
-                <span class="item-name">{{ itemName(n.item_id) }}</span>
+                <span class="item-name"
+                  >{{ itemName(n.item_id) }} <span v-if="itemUnit(n.item_id)" class="item-unit">{{ itemUnit(n.item_id) }}</span></span
+                >
                 <span class="delivered-badge" :class="{ done: n.is_delivered }">
                   {{ n.is_delivered ? "Delivered" : "Pending" }}
                 </span>
@@ -398,6 +404,11 @@ onMounted(async () => {
 
 .need-item.delivered .item-name {
   text-decoration: line-through;
+}
+
+.item-unit {
+  color: var(--color-danger);
+  font-size: 0.8em;
 }
 
 .delivered-badge {

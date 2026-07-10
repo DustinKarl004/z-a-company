@@ -51,12 +51,18 @@ function branchName(id) {
 }
 
 function peso(amount) {
-  return `₱${amount.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `₱${Number(amount || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-const totalSales = computed(() => sales.value.reduce((sum, s) => sum + s.amount, 0));
+// Guards against floating-point noise (e.g. 10.7 + 5.3 - 3.85 === 12.150000000000002)
+// from leaking into displayed quantities/amounts.
+function round2(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+const totalSales = computed(() => sales.value.reduce((sum, s) => sum + (Number(s.amount) || 0), 0));
 const totalBills = computed(() =>
-  expenses.value.reduce((sum, e) => (e.is_projected ? sum : sum + (e.amount || 0)), 0)
+  expenses.value.reduce((sum, e) => (e.is_projected ? sum : sum + (Number(e.amount) || 0)), 0)
 );
 
 // A future date is just a preview (nothing saved yet) — inputs are disabled
@@ -250,6 +256,7 @@ function stockRowFor(branchId, itemId) {
       branchId,
       itemId,
       itemName: "—",
+      unit: "",
       price: 0,
       opening: 0,
       delivery: "",
@@ -310,6 +317,7 @@ async function refreshStockExpense() {
       const key = stockRowKey(branch.id, item.id);
       const row = stockRowFor(branch.id, item.id);
       row.itemName = item.name;
+      row.unit = item.unit || "";
       row.price = item.price || 0;
       row.opening = openingMap.get(key) || 0;
       const delivery = deliveryMap.get(key);
@@ -408,13 +416,14 @@ const stockExpenseRows = computed(() =>
     const delivery = row.delivery === "" ? 0 : Number(row.delivery) || 0;
     const hasClosing = row.closing !== "" && !Number.isNaN(Number(row.closing));
     const closing = hasClosing ? Number(row.closing) : null;
-    const used = hasClosing ? opening + delivery - closing : null;
-    const expense = hasClosing ? used * row.price : null;
+    const used = hasClosing ? round2(opening + delivery - closing) : null;
+    const expense = hasClosing ? round2(used * row.price) : null;
     return {
       key: stockRowKey(row.branchId, row.itemId),
       branchId: row.branchId,
       itemId: row.itemId,
       itemName: row.itemName,
+      unit: row.unit,
       opening,
       delivery,
       closing,
@@ -427,9 +436,11 @@ const stockExpenseRows = computed(() =>
   })
 );
 
-const stockExpenseTotal = computed(() => stockExpenseRows.value.reduce((sum, r) => sum + (r.expense || 0), 0));
-const grandTotalExpense = computed(() => stockExpenseTotal.value + totalBills.value);
-const dailyProfit = computed(() => totalSales.value - grandTotalExpense.value);
+const stockExpenseTotal = computed(() =>
+  round2(stockExpenseRows.value.reduce((sum, r) => sum + (r.expense || 0), 0))
+);
+const grandTotalExpense = computed(() => round2(stockExpenseTotal.value + totalBills.value));
+const dailyProfit = computed(() => round2(totalSales.value - grandTotalExpense.value));
 
 const COLLAPSED_BRANCHES_KEY = "za-admin-expenses-collapsed-branches";
 
@@ -485,7 +496,7 @@ const stockExpenseByBranch = computed(() => {
     groups.get(row.branchId).push(row);
   }
   return [...groups.entries()].map(([branchId, rows]) => {
-    const total = rows.reduce((sum, r) => sum + (r.expense || 0), 0);
+    const total = round2(rows.reduce((sum, r) => sum + (r.expense || 0), 0));
     const sales = Number(salesRowFor(branchId).amount) || 0;
     const bills = billRowFor(branchId).projected ? 0 : Number(billRowFor(branchId).amount) || 0;
     return {
@@ -493,7 +504,7 @@ const stockExpenseByBranch = computed(() => {
       name: branchName(branchId),
       rows: sortRows(rows),
       total,
-      grandTotal: sales - (total + bills),
+      grandTotal: round2(sales - (total + bills)),
     };
   });
 });
@@ -602,7 +613,7 @@ function writeBranchBlock(sheet, merges, group, rowOffset, colOffset) {
   r++;
 
   for (const row of group.rows) {
-    setCell(sheet, r, colOffset, row.itemName, cellStyle);
+    setCell(sheet, r, colOffset, row.unit ? `${row.itemName} ${row.unit}` : row.itemName, cellStyle);
     setCell(sheet, r, colOffset + 1, row.opening, cellStyleRight);
     setCell(sheet, r, colOffset + 2, row.delivery, cellStyleRight);
     setCell(sheet, r, colOffset + 3, peso(row.price), cellStyleRight);
@@ -779,29 +790,39 @@ async function fetchDayReport(dateStr, items) {
         const closingRaw = closingMap.get(key);
         const hasClosing = closingRaw !== undefined;
         const closing = hasClosing ? closingRaw : null;
-        const used = hasClosing ? opening + delivery - closing : null;
-        const expense = hasClosing ? used * (item.price || 0) : null;
-        return { itemName: item.name, opening, delivery, price: item.price || 0, closing, hasClosing, used, expense };
+        const used = hasClosing ? round2(opening + delivery - closing) : null;
+        const expense = hasClosing ? round2(used * (item.price || 0)) : null;
+        return {
+          itemName: item.name,
+          unit: item.unit || "",
+          opening,
+          delivery,
+          price: item.price || 0,
+          closing,
+          hasClosing,
+          used,
+          expense,
+        };
       });
-    const total = rows.reduce((sum, r) => sum + (r.expense || 0), 0);
+    const total = round2(rows.reduce((sum, r) => sum + (r.expense || 0), 0));
     return { branchId: b.id, name: b.name, rows, total };
   });
 
   const summaries = relevantBranches.map((b) => {
-    const sales = salesMap.get(b.id) || 0;
-    const bills = billsMap.get(b.id) || 0;
+    const sales = Number(salesMap.get(b.id)) || 0;
+    const bills = Number(billsMap.get(b.id)) || 0;
     const stockExpense = groups.find((g) => g.branchId === b.id)?.total || 0;
-    const totalExpense = bills + stockExpense;
-    return { branchName: b.name, sales, bills, stockExpense, totalExpense, profit: sales - totalExpense };
+    const totalExpense = round2(bills + stockExpense);
+    return { branchName: b.name, sales, bills, stockExpense, totalExpense, profit: round2(sales - totalExpense) };
   });
 
   const totals = summaries.reduce(
     (acc, r) => ({
-      sales: acc.sales + r.sales,
-      bills: acc.bills + r.bills,
-      stockExpense: acc.stockExpense + r.stockExpense,
-      totalExpense: acc.totalExpense + r.totalExpense,
-      profit: acc.profit + r.profit,
+      sales: round2(acc.sales + r.sales),
+      bills: round2(acc.bills + r.bills),
+      stockExpense: round2(acc.stockExpense + r.stockExpense),
+      totalExpense: round2(acc.totalExpense + r.totalExpense),
+      profit: round2(acc.profit + r.profit),
     }),
     { sales: 0, bills: 0, stockExpense: 0, totalExpense: 0, profit: 0 }
   );
@@ -894,11 +915,11 @@ function buildSummarySheet(dayResults, monthLabel) {
     setCell(sheet, r, 3, peso(day.totals.stockExpense), cellStyleRight);
     setCell(sheet, r, 4, peso(day.totals.totalExpense), cellStyleRight);
     setCell(sheet, r, 5, peso(day.totals.profit), cellStyleColored(day.totals.profit >= 0 ? GREEN : RED));
-    monthTotals.sales += day.totals.sales;
-    monthTotals.bills += day.totals.bills;
-    monthTotals.stockExpense += day.totals.stockExpense;
-    monthTotals.totalExpense += day.totals.totalExpense;
-    monthTotals.profit += day.totals.profit;
+    monthTotals.sales = round2(monthTotals.sales + day.totals.sales);
+    monthTotals.bills = round2(monthTotals.bills + day.totals.bills);
+    monthTotals.stockExpense = round2(monthTotals.stockExpense + day.totals.stockExpense);
+    monthTotals.totalExpense = round2(monthTotals.totalExpense + day.totals.totalExpense);
+    monthTotals.profit = round2(monthTotals.profit + day.totals.profit);
     r++;
   }
 
@@ -1239,7 +1260,7 @@ watch([selectedDate, selectedBranchId], () => {
             </thead>
             <tbody>
               <tr v-for="row in group.rows" :key="row.key">
-                <td>{{ row.itemName }}</td>
+                <td>{{ row.itemName }} <span v-if="row.unit" class="item-unit">{{ row.unit }}</span></td>
                 <td>{{ row.opening }}</td>
                 <td>
                   <input
@@ -1732,6 +1753,11 @@ watch([selectedDate, selectedBranchId], () => {
 
 .stock-expense-table td.negative {
   color: var(--color-danger);
+}
+
+.item-unit {
+  color: var(--color-danger);
+  font-size: 0.8em;
 }
 
 .daily-bills-title {
