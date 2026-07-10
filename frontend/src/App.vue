@@ -55,28 +55,40 @@ onUnmounted(() => {
 <style scoped>
 .update-banner {
   position: fixed;
-  left: 50%;
-  bottom: 16px;
-  transform: translateX(-50%);
+  left: 16px;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  max-width: 420px;
+  margin: 0 auto;
+  box-sizing: border-box;
   z-index: 9999;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
   background: #1f2937;
   color: #fff;
-  padding: 10px 16px;
+  padding: 12px 16px;
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
   font-size: 14px;
 }
 
+.update-banner span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .update-banner button {
+  flex: 0 0 auto;
   background: #fff;
   color: #1f2937;
   border: none;
   border-radius: 6px;
-  padding: 6px 12px;
+  padding: 8px 14px;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
 }
 </style>
