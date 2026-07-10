@@ -9,7 +9,6 @@ import { createTotalSale, listSales, updateTotalSale } from "../api/sales";
 import { useAuthStore } from "../stores/auth";
 import Icon from "../components/Icon.vue";
 import LoadingState from "../components/LoadingState.vue";
-import Modal from "../components/Modal.vue";
 import { toLocalISO, todayLocalISO, businessDay, businessDayCutoffLabel, fetchBusinessToday } from "../utils/date";
 
 const auth = useAuthStore();
@@ -64,10 +63,6 @@ const error = ref("");
 const search = ref("");
 
 const totalSale = reactive({ id: null, amount: "", touched: false, saving: false, saved: false, error: "", editing: false });
-
-const submitting = ref(false);
-const submitError = ref("");
-const showThankYou = ref(false);
 
 function peso(amount) {
   return `₱${amount.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -134,6 +129,11 @@ function kilogramUsed(itemId) {
 
 function isComplete(itemId) {
   return kilogramUsed(itemId) !== null;
+}
+
+function formatUsed(itemId) {
+  const used = kilogramUsed(itemId);
+  return used === null ? "" : used.toFixed(2);
 }
 
 async function refresh() {
@@ -274,12 +274,14 @@ function useOpeningAsClosing(itemId) {
   const r = rowFor(itemId);
   r.closing = String(r.opening ?? 0);
   r.closingTouched = true;
+  saveClosing(itemId);
 }
 
 function toggleNeed(itemId, checked) {
   const r = rowFor(itemId);
   r.needChecked = checked;
   r.needTouched = true;
+  saveNeed(itemId);
 }
 
 async function saveNeed(itemId) {
@@ -298,29 +300,6 @@ async function saveNeed(itemId) {
     r.needError = e instanceof ApiError ? e.detail || "Could not save" : "Could not save";
   } finally {
     r.needSaving = false;
-  }
-}
-
-async function submitAll() {
-  submitError.value = "";
-  submitting.value = true;
-  try {
-    if (totalSale.touched) await saveTotalSale();
-    for (const item of stockItems.value) {
-      const r = rowFor(item.id);
-      if (r.deliveryTouched) await saveDelivery(item.id);
-      if (r.closingTouched) await saveClosing(item.id);
-      if (r.needTouched) await saveNeed(item.id);
-    }
-    const hasError =
-      totalSale.error || Object.values(rows).some((r) => r.deliveryError || r.closingError || r.needError);
-    if (hasError) {
-      submitError.value = "Some entries could not be saved. Please check and try again.";
-      return;
-    }
-    showThankYou.value = true;
-  } finally {
-    submitting.value = false;
   }
 }
 
@@ -375,6 +354,7 @@ onUnmounted(() => {
               placeholder="0"
               v-model="totalSale.amount"
               @input="totalSale.touched = true"
+              @blur="saveTotalSale"
               @keyup.enter="($event.target).blur()"
             />
           </div>
@@ -434,6 +414,7 @@ onUnmounted(() => {
               placeholder="0"
               v-model="rowFor(item.id).delivery"
               @input="rowFor(item.id).deliveryTouched = true"
+              @blur="saveDelivery(item.id)"
               @keyup.enter="($event.target).blur()"
             />
           </div>
@@ -451,6 +432,7 @@ onUnmounted(() => {
                 placeholder="0"
                 v-model="rowFor(item.id).closing"
                 @input="rowFor(item.id).closingTouched = true"
+                @blur="saveClosing(item.id)"
                 @keyup.enter="($event.target).blur()"
               />
               <button
@@ -471,7 +453,7 @@ onUnmounted(() => {
               v-if="isComplete(item.id)"
               class="value-text"
               :class="{ negative: kilogramUsed(item.id) < 0, positive: kilogramUsed(item.id) > 0 }"
-            >{{ kilogramUsed(item.id) }}</span>
+            >{{ formatUsed(item.id) }}</span>
             <span v-else class="value-text muted">—</span>
           </div>
         </div>
@@ -491,22 +473,7 @@ onUnmounted(() => {
         <p v-if="rowFor(item.id).needError" class="row-error">{{ rowFor(item.id).needError }}</p>
       </div>
     </div>
-
-    <p v-if="submitError" class="error-message top-error">{{ submitError }}</p>
-
-    <div class="submit-bar">
-      <button type="button" class="submit-btn" :disabled="submitting" @click="submitAll">
-        {{ submitting ? "Submitting..." : "Submit" }}
-      </button>
-    </div>
   </template>
-
-  <Modal v-if="showThankYou" title="" @close="showThankYou = false">
-    <div class="thank-you">
-      <p class="thank-you-message">Thank you for your hardwork today! Rest well and God bless. 😊</p>
-      <button type="button" @click="showThankYou = false">Okay</button>
-    </div>
-  </Modal>
 </template>
 
 <style scoped>
@@ -805,34 +772,6 @@ onUnmounted(() => {
   color: var(--color-danger);
   font-size: 0.8rem;
   margin: 0.4rem 0 0;
-}
-
-.submit-bar {
-  position: sticky;
-  bottom: 0;
-  padding: 1rem 0;
-  margin-top: 0.5rem;
-  background: var(--color-bg);
-}
-
-.submit-btn {
-  width: 100%;
-  padding: 0.85rem;
-  font-size: 1rem;
-  font-weight: 700;
-}
-
-.thank-you {
-  text-align: center;
-}
-
-.thank-you-message {
-  font-size: 1.05rem;
-  margin: 0.5rem 0 1.25rem;
-}
-
-.thank-you button {
-  min-width: 120px;
 }
 
 @media (max-width: 520px) {
