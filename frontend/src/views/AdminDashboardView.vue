@@ -5,7 +5,6 @@ import MonthYearPicker from "../components/MonthYearPicker.vue";
 import LoadingState from "../components/LoadingState.vue";
 
 const SERIES_COLORS = ["#ff2d4d", "#ff8a3d", "#ffe14d", "#4dd6ff", "#8a6bff", "#4dffb0", "#ff4dd2", "#c8c8c8"];
-const BAR_COLOR = "#ff2d4d";
 
 const overview = ref(null);
 const monthly = ref(null);
@@ -15,6 +14,15 @@ const monthlyLoading = ref(false);
 const now = new Date();
 const selectedYear = ref(now.getFullYear());
 const selectedMonth = ref(now.getMonth() + 1);
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// --- Bar chart: profit by branch on a chosen date (defaults to today) ---
+const profitDate = ref(todayIso());
+const profitOverview = ref(null);
+const profitLoading = ref(false);
 
 function peso(amount) {
   return `₱${amount.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -34,6 +42,12 @@ async function loadOverview() {
   loading.value = false;
 }
 
+async function loadProfitOverview() {
+  profitLoading.value = true;
+  profitOverview.value = await getOverview(profitDate.value);
+  profitLoading.value = false;
+}
+
 async function loadMonthly() {
   monthlyLoading.value = true;
   monthly.value = await getMonthly(selectedYear.value, selectedMonth.value);
@@ -41,11 +55,11 @@ async function loadMonthly() {
 }
 
 onMounted(async () => {
-  await loadOverview();
-  await loadMonthly();
+  await Promise.all([loadOverview(), loadProfitOverview(), loadMonthly()]);
 });
 
 watch([selectedYear, selectedMonth], loadMonthly);
+watch(profitDate, loadProfitOverview);
 
 const alertCount = computed(() => overview.value?.branches.filter((b) => b.has_shortfall).length || 0);
 
@@ -55,7 +69,7 @@ const BAR_CHART_H = 220;
 const BAR_MARGIN = { top: 24, right: 16, bottom: 28, left: 16 };
 
 const barChart = computed(() => {
-  const branches = overview.value?.branches || [];
+  const branches = profitOverview.value?.branches || [];
   const innerW = BAR_CHART_W - BAR_MARGIN.left - BAR_MARGIN.right;
   const innerH = BAR_CHART_H - BAR_MARGIN.top - BAR_MARGIN.bottom;
   const maxVal = niceMax(Math.max(...branches.map((b) => b.profit), 0));
@@ -69,7 +83,7 @@ const barChart = computed(() => {
       id: b.branch_id,
       name: b.branch_name,
       value: b.profit,
-      hasShortfall: b.has_shortfall,
+      color: SERIES_COLORS[i % SERIES_COLORS.length],
       x: bandCenter - barWidth / 2,
       y: BAR_MARGIN.top + innerH - barHeight,
       width: barWidth,
@@ -84,74 +98,31 @@ const barChart = computed(() => {
 
 const hoveredBar = ref(null);
 
-// --- Line chart: daily sales trend by branch ---
-const LINE_CHART_W = 640;
-const LINE_CHART_H = 260;
-const LINE_MARGIN = { top: 16, right: 16, bottom: 28, left: 40 };
+// --- Donut chart: monthly sales share by branch ---
+const DONUT_R = 70;
+const DONUT_STROKE = 26;
+const DONUT_CIRC = 2 * Math.PI * DONUT_R;
 
-const lineChart = computed(() => {
-  const daily = monthly.value?.daily || [];
+const donutChart = computed(() => {
   const branches = monthly.value?.branches || [];
-  const innerW = LINE_CHART_W - LINE_MARGIN.left - LINE_MARGIN.right;
-  const innerH = LINE_CHART_H - LINE_MARGIN.top - LINE_MARGIN.bottom;
-
-  const maxVal = niceMax(
-    Math.max(...daily.flatMap((d) => Object.values(d.branch_sales)), 0)
-  );
-  const n = daily.length;
-  const xStep = n > 1 ? innerW / (n - 1) : 0;
-
-  const xAt = (i) => LINE_MARGIN.left + xStep * i;
-  const yAt = (v) => LINE_MARGIN.top + innerH - (maxVal > 0 ? (v / maxVal) * innerH : 0);
-
-  const series = branches.map((b, si) => {
-    const color = SERIES_COLORS[si % SERIES_COLORS.length];
-    const points = daily.map((d, i) => ({ x: xAt(i), y: yAt(d.branch_sales[b.branch_id] || 0) }));
-    const path = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
-    return { id: b.branch_id, name: b.branch_name, color, points, path, total: b.total_sales };
+  const total = monthly.value?.total_sales || 0;
+  let cumulative = 0;
+  const segments = branches.map((b, i) => {
+    const pct = total > 0 ? b.total_sales / total : 0;
+    const length = pct * DONUT_CIRC;
+    const segment = {
+      id: b.branch_id,
+      name: b.branch_name,
+      value: b.total_sales,
+      pct,
+      color: SERIES_COLORS[i % SERIES_COLORS.length],
+      dasharray: `${length} ${DONUT_CIRC - length}`,
+      dashoffset: -cumulative,
+    };
+    cumulative += length;
+    return segment;
   });
-
-  const gridLines = [0, 0.25, 0.5, 0.75, 1].map((f) => {
-    const value = maxVal * f;
-    return { y: yAt(value), value };
-  });
-
-  const labelEvery = Math.max(1, Math.ceil(n / 8));
-  const xLabels = daily
-    .map((d, i) => ({ x: xAt(i), label: d.date.slice(8, 10), i }))
-    .filter((l) => l.i % labelEvery === 0);
-
-  return { series, gridLines, xLabels, innerH, xAt, dates: daily.map((d) => d.date) };
-});
-
-const hoverIndex = ref(null);
-const lineChartEl = ref(null);
-
-function onLineChartMove(evt) {
-  const daily = monthly.value?.daily || [];
-  if (!daily.length || !lineChartEl.value) return;
-  const rect = lineChartEl.value.getBoundingClientRect();
-  const scaleX = LINE_CHART_W / rect.width;
-  const localX = (evt.clientX - rect.left) * scaleX;
-  const innerW = LINE_CHART_W - LINE_MARGIN.left - LINE_MARGIN.right;
-  const ratio = Math.min(1, Math.max(0, (localX - LINE_MARGIN.left) / innerW));
-  hoverIndex.value = Math.round(ratio * (daily.length - 1));
-}
-
-function onLineChartLeave() {
-  hoverIndex.value = null;
-}
-
-const hoverTooltip = computed(() => {
-  if (hoverIndex.value === null || !monthly.value) return null;
-  const point = monthly.value.daily[hoverIndex.value];
-  if (!point) return null;
-  const rows = lineChart.value.series.map((s) => ({
-    name: s.name,
-    color: s.color,
-    value: point.branch_sales[s.id] || 0,
-  }));
-  return { date: point.date, x: lineChart.value.xAt(hoverIndex.value), rows };
+  return { segments, total };
 });
 </script>
 
@@ -187,19 +158,23 @@ const hoverTooltip = computed(() => {
       </div>
 
       <div class="card chart-card" v-if="overview.branches.length">
-        <h2 class="card-title">Daily profit by branch</h2>
-        <div class="chart-scroll">
+        <div class="monthly-header">
+          <h2 class="card-title">Daily profit by branch</h2>
+          <input v-model="profitDate" type="date" :max="todayIso()" />
+        </div>
+        <LoadingState v-if="profitLoading" label="Loading profit..." />
+        <div v-else class="chart-scroll">
           <svg
             class="bar-chart"
             :viewBox="`0 0 ${BAR_CHART_W} ${BAR_CHART_H}`"
             preserveAspectRatio="xMidYMid meet"
             role="img"
-            aria-label="Bar chart of today's profit per branch"
+            :aria-label="`Bar chart of profit per branch on ${profitDate}`"
           >
             <defs>
-              <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" :stop-color="BAR_COLOR" stop-opacity="1" />
-                <stop offset="100%" :stop-color="BAR_COLOR" stop-opacity="0.35" />
+              <linearGradient v-for="bar in barChart.bars" :key="bar.id" :id="`barGradient-${bar.id}`" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" :stop-color="bar.color" stop-opacity="1" />
+                <stop offset="100%" :stop-color="bar.color" stop-opacity="0.35" />
               </linearGradient>
             </defs>
             <line
@@ -218,14 +193,14 @@ const hoverTooltip = computed(() => {
                 :width="bar.width"
                 :height="Math.max(bar.height, 1)"
                 rx="4"
-                fill="url(#barGradient)"
+                :fill="`url(#barGradient-${bar.id})`"
+                :style="{ '--bar-glow': bar.color }"
                 tabindex="0"
                 @pointerenter="hoveredBar = bar.id"
                 @pointerleave="hoveredBar = null"
                 @focus="hoveredBar = bar.id"
                 @blur="hoveredBar = null"
               />
-              <circle v-if="bar.hasShortfall" class="alert-dot" :cx="bar.x + bar.width / 2" :cy="bar.y - 16" r="3" />
               <text class="bar-value" :x="bar.labelX" :y="bar.y - 8" text-anchor="middle">
                 {{ peso(bar.value) }}
               </text>
@@ -245,98 +220,46 @@ const hoverTooltip = computed(() => {
 
         <LoadingState v-if="monthlyLoading" label="Loading monthly trend..." />
         <template v-else-if="monthly">
-          <div v-if="monthly.daily?.length" class="monthly-body">
-            <div class="line-chart-scroll">
-              <div class="line-chart-wrap">
-                <svg
-                ref="lineChartEl"
-                class="line-chart"
-                :viewBox="`0 0 ${LINE_CHART_W} ${LINE_CHART_H}`"
-                preserveAspectRatio="xMidYMid meet"
-                role="img"
-                aria-label="Line chart of daily sales this month per branch"
-                @pointermove="onLineChartMove"
-                @pointerleave="onLineChartLeave"
+          <div v-if="donutChart.segments.length" class="donut-body">
+            <svg
+              class="donut-chart"
+              viewBox="0 0 180 180"
+              role="img"
+              aria-label="Donut chart of this month's sales share per branch"
+            >
+              <circle
+                class="donut-track"
+                cx="90"
+                cy="90"
+                :r="DONUT_R"
+                fill="none"
+                :stroke-width="DONUT_STROKE"
+              />
+              <circle
+                v-for="seg in donutChart.segments"
+                :key="seg.id"
+                class="donut-segment"
+                cx="90"
+                cy="90"
+                :r="DONUT_R"
+                fill="none"
+                :stroke="seg.color"
+                :stroke-width="DONUT_STROKE"
+                :stroke-dasharray="seg.dasharray"
+                :stroke-dashoffset="seg.dashoffset"
+                transform="rotate(-90 90 90)"
               >
-                <line
-                  v-for="(g, i) in lineChart.gridLines"
-                  :key="i"
-                  class="gridline"
-                  :x1="LINE_MARGIN.left"
-                  :x2="LINE_CHART_W - LINE_MARGIN.right"
-                  :y1="g.y"
-                  :y2="g.y"
-                />
-                <text
-                  v-for="(g, i) in lineChart.gridLines"
-                  :key="'gy' + i"
-                  class="axis-label"
-                  :x="LINE_MARGIN.left - 8"
-                  :y="g.y + 3"
-                  text-anchor="end"
-                >
-                  {{ Math.round(g.value).toLocaleString("en-PH") }}
-                </text>
-                <text
-                  v-for="l in lineChart.xLabels"
-                  :key="l.i"
-                  class="axis-label"
-                  :x="l.x"
-                  :y="LINE_CHART_H - 8"
-                  text-anchor="middle"
-                >
-                  {{ l.label }}
-                </text>
-
-                <path
-                  v-for="s in lineChart.series"
-                  :key="s.id"
-                  class="series-line"
-                  :d="s.path"
-                  :stroke="s.color"
-                  fill="none"
-                />
-
-                <g v-if="hoverTooltip">
-                  <line
-                    class="crosshair"
-                    :x1="hoverTooltip.x"
-                    :x2="hoverTooltip.x"
-                    :y1="LINE_MARGIN.top"
-                    :y2="LINE_CHART_H - LINE_MARGIN.bottom"
-                  />
-                  <circle
-                    v-for="row in hoverTooltip.rows"
-                    :key="row.name"
-                    class="hover-dot"
-                    :cx="hoverTooltip.x"
-                    :cy="lineChart.series.find((s) => s.name === row.name).points[hoverIndex].y"
-                    r="4"
-                    :fill="row.color"
-                  />
-                </g>
-              </svg>
-
-              <div
-                v-if="hoverTooltip"
-                class="chart-tooltip"
-                :style="{ left: `${(hoverTooltip.x / LINE_CHART_W) * 100}%` }"
-              >
-                <div class="tooltip-date">{{ hoverTooltip.date }}</div>
-                <div v-for="row in hoverTooltip.rows" :key="row.name" class="tooltip-row">
-                  <span class="tooltip-key" :style="{ background: row.color }"></span>
-                  <span class="tooltip-name">{{ row.name }}</span>
-                  <span class="tooltip-value">{{ peso(row.value) }}</span>
-                </div>
-              </div>
-            </div>
-            </div>
+                <title>{{ seg.name }}: {{ peso(seg.value) }} ({{ (seg.pct * 100).toFixed(1) }}%)</title>
+              </circle>
+              <text class="donut-total" x="90" y="86" text-anchor="middle">Total</text>
+              <text class="donut-total-value" x="90" y="104" text-anchor="middle">{{ peso(donutChart.total) }}</text>
+            </svg>
 
             <ul class="branch-totals">
-              <li v-for="s in lineChart.series" :key="s.id">
-                <span class="legend-swatch" :style="{ background: s.color }"></span>
-                <span class="branch-totals-name">{{ s.name }}</span>
-                <span class="branch-totals-value">{{ peso(s.total) }}</span>
+              <li v-for="seg in donutChart.segments" :key="seg.id">
+                <span class="legend-swatch" :style="{ background: seg.color }"></span>
+                <span class="branch-totals-name">{{ seg.name }}</span>
+                <span class="branch-totals-value">{{ peso(seg.value) }}</span>
               </li>
               <li class="branch-totals-all">
                 <span class="branch-totals-name">All branches</span>
@@ -481,17 +404,12 @@ const hoverTooltip = computed(() => {
 .bar {
   transition: opacity 0.15s ease, filter 0.15s ease;
   cursor: pointer;
-  filter: drop-shadow(0 0 6px var(--dash-glow));
+  filter: drop-shadow(0 0 6px var(--bar-glow, var(--dash-glow)));
 }
 
 .bar-hover {
   opacity: 0.85;
-  filter: drop-shadow(0 0 14px var(--dash-glow));
-}
-
-.alert-dot {
-  fill: #ffb84d;
-  filter: drop-shadow(0 0 4px rgba(255, 184, 77, 0.8));
+  filter: drop-shadow(0 0 14px var(--bar-glow, var(--dash-glow)));
 }
 
 .bar-value {
@@ -506,101 +424,6 @@ const hoverTooltip = computed(() => {
   fill: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-}
-
-.monthly-body {
-  display: grid;
-  grid-template-columns: 1fr 220px;
-  gap: 1.5rem;
-  align-items: start;
-}
-
-.line-chart-scroll {
-  overflow-x: auto;
-}
-
-.line-chart-wrap {
-  position: relative;
-  min-width: 560px;
-}
-
-.line-chart {
-  width: 100%;
-  height: 260px;
-  overflow: visible;
-}
-
-.gridline {
-  stroke: var(--color-border);
-  stroke-width: 1;
-}
-
-.axis-label {
-  font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 10px;
-  fill: var(--color-text-muted);
-}
-
-.series-line {
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  filter: drop-shadow(0 0 4px currentColor);
-}
-
-.crosshair {
-  stroke: var(--color-border);
-  stroke-width: 1;
-}
-
-.hover-dot {
-  stroke: var(--color-surface);
-  stroke-width: 2;
-}
-
-.chart-tooltip {
-  position: absolute;
-  top: 0;
-  transform: translateX(-50%);
-  background: var(--color-primary-dark);
-  border: 1px solid var(--color-border);
-  color: #fff;
-  border-radius: 8px;
-  padding: 0.6rem 0.75rem;
-  font-size: 0.8rem;
-  pointer-events: none;
-  white-space: nowrap;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-  z-index: 1;
-}
-
-.tooltip-date {
-  font-weight: 700;
-  margin-bottom: 0.35rem;
-  font-family: "SFMono-Regular", Consolas, monospace;
-}
-
-.tooltip-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.tooltip-key {
-  width: 10px;
-  height: 3px;
-  border-radius: 2px;
-  flex-shrink: 0;
-}
-
-.tooltip-name {
-  flex: 1;
-  opacity: 0.85;
-}
-
-.tooltip-value {
-  font-weight: 700;
-  font-family: "SFMono-Regular", Consolas, monospace;
 }
 
 .legend-swatch {
@@ -654,13 +477,49 @@ const hoverTooltip = computed(() => {
   color: var(--color-primary);
 }
 
+.donut-body {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.donut-chart {
+  width: 100%;
+  max-width: 200px;
+  height: auto;
+}
+
+.donut-track {
+  stroke: var(--color-border);
+}
+
+.donut-segment {
+  transition: opacity 0.15s ease;
+}
+
+.donut-total {
+  font-size: 10px;
+  fill: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.donut-total-value {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 13px;
+  font-weight: 700;
+  fill: var(--color-text);
+}
+
+.donut-body .branch-totals {
+  border-left: none;
+  padding-left: 0;
+}
+
 @media (max-width: 860px) {
   .stat-row {
     grid-template-columns: repeat(2, 1fr);
-  }
-
-  .monthly-body {
-    grid-template-columns: 1fr;
   }
 
   .branch-totals {
@@ -668,6 +527,11 @@ const hoverTooltip = computed(() => {
     border-top: 1px solid var(--color-border);
     padding-left: 0;
     padding-top: 1rem;
+  }
+
+  .donut-body {
+    grid-template-columns: 1fr;
+    justify-items: center;
   }
 }
 

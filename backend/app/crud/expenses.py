@@ -127,11 +127,14 @@ def delete_month_data(db: Session, *, year: int, month: int) -> None:
     """Delete expenses, sales, stock counts, and stock deliveries for every branch
     in the given month (used to clear out old data once it's no longer needed).
 
-    The stock count on the last day of the month is kept, since it's the
-    "opening" figure for the 1st day of the following month."""
+    The closing stock count, sales, and daily bill on the last day of the month
+    are kept — the stock count is the "opening" figure for the 1st day of the
+    following month, and keeping that day's sales/bill alongside it means the
+    last day still has a real, correct profit figure instead of one computed
+    against a missing opening balance."""
     start = date(year, month, 1)
     end = date(year, month, calendar.monthrange(year, month)[1])
-    for model in (Expense, Sale, StockDelivery):
-        db.execute(delete(model).where(model.date >= start, model.date <= end))
-    db.execute(delete(StockCount).where(StockCount.date >= start, StockCount.date < end))
+    db.execute(delete(StockDelivery).where(StockDelivery.date >= start, StockDelivery.date <= end))
+    for model in (Expense, Sale, StockCount):
+        db.execute(delete(model).where(model.date >= start, model.date < end))
     db.commit()

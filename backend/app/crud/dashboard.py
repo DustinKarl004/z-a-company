@@ -87,16 +87,16 @@ def _branch_summary(db: Session, branch: Branch, start: date_type, end: date_typ
     }
 
 
-def overview(db: Session) -> dict:
-    today = local_today()
+def overview(db: Session, date_: date_type | None = None) -> dict:
+    target_date = date_ or local_today()
     branches = list(db.scalars(select(Branch).order_by(Branch.name)))
-    branch_summaries = [_branch_summary(db, b, today, today) for b in branches]
+    branch_summaries = [_branch_summary(db, b, target_date, target_date) for b in branches]
 
     branch_count = len(branches)
     staff_count = db.scalar(select(func.count()).select_from(User).where(User.role == "staff"))
 
     return {
-        "date": today.isoformat(),
+        "date": target_date.isoformat(),
         "branch_count": branch_count,
         "staff_count": staff_count,
         "branches": branch_summaries,

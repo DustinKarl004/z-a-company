@@ -1,7 +1,7 @@
 import { apiFetch } from "./client";
 
-export function getOverview() {
-  return apiFetch("/dashboard/overview");
+export function getOverview(date) {
+  return apiFetch(date ? `/dashboard/overview?date=${date}` : "/dashboard/overview");
 }
 
 export function getMonthly(year, month) {

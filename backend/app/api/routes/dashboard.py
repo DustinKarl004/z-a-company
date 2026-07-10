@@ -1,3 +1,5 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
@@ -10,8 +12,10 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"], dependencies=[Depend
 
 
 @router.get("/overview", response_model=OverviewResponse)
-def overview_endpoint(db: Session = Depends(get_db)) -> OverviewResponse:
-    return OverviewResponse.model_validate(overview(db))
+def overview_endpoint(
+    date: date | None = Query(None), db: Session = Depends(get_db)
+) -> OverviewResponse:
+    return OverviewResponse.model_validate(overview(db, date))
 
 
 @router.get("/monthly", response_model=MonthlyResponse)
