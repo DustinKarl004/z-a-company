@@ -115,8 +115,12 @@ const filteredItems = computed(() => {
   return sortedItems.value.filter((i) => i.name.toLowerCase().includes(term));
 });
 
-const loggedTodayCount = computed(
-  () => Object.values(rows).filter((r) => r.delivery !== "" || r.closing !== "").length
+const deliveryLoggedCount = computed(
+  () => Object.values(rows).filter((r) => r.deliveryId !== null).length
+);
+
+const closingLoggedCount = computed(
+  () => Object.values(rows).filter((r) => r.closingId !== null).length
 );
 
 function kilogramUsed(itemId) {
@@ -366,7 +370,10 @@ onUnmounted(() => {
       </p>
       <p class="page-subtitle cutoff-note">Today's log carries over until {{ cutoffLabel }}</p>
     </div>
-    <span v-if="!loading" class="count-chip"><Icon name="count" :size="14" /> {{ loggedTodayCount }}/{{ stockItems.length }} logged today</span>
+    <div v-if="!loading" class="count-chips">
+      <span class="count-chip"><Icon name="count" :size="14" /> {{ deliveryLoggedCount }}/{{ stockItems.length }} delivery</span>
+      <span class="count-chip"><Icon name="count" :size="14" /> {{ closingLoggedCount }}/{{ stockItems.length }} closing</span>
+    </div>
   </div>
 
   <p v-if="error" class="error-message top-error">{{ error }}</p>
@@ -522,6 +529,12 @@ onUnmounted(() => {
   gap: 1rem;
   flex-wrap: wrap;
   margin-bottom: 1.75rem;
+}
+
+.count-chips {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .branch-chip {
