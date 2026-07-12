@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
-import { ApiError } from "../api/client";
+import { ApiError, NetworkError } from "../api/client";
 import { listStockItems } from "../api/stockItems";
 import { createStockDelivery, deleteStockDelivery, listStockDeliveries, updateStockDelivery } from "../api/stockDeliveries";
 import { createStockCount, deleteStockCount, listStockCounts, updateStockCount } from "../api/stockCounts";
@@ -62,7 +62,7 @@ const loading = ref(true);
 const error = ref("");
 const search = ref("");
 
-const totalSale = reactive({ id: null, amount: "", touched: false, saving: false, saved: false, error: "", editing: false });
+const totalSale = reactive({ id: null, amount: "", touched: false, saving: false, retrying: false, saved: false, error: "", editing: false });
 
 function peso(amount) {
   return `₱${amount.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -79,18 +79,21 @@ function rowFor(itemId) {
       deliveryTouched: false,
       deliveryId: null,
       deliverySaving: false,
+      deliveryRetrying: false,
       deliverySaved: false,
       deliveryError: "",
       closing: "",
       closingTouched: false,
       closingId: null,
       closingSaving: false,
+      closingRetrying: false,
       closingSaved: false,
       closingError: "",
       needId: null,
       needChecked: false,
       needTouched: false,
       needSaving: false,
+      needRetrying: false,
       needError: "",
     };
   }
@@ -188,27 +191,53 @@ function flashSaved(r, field) {
   }, 1500);
 }
 
+// Transient wifi drops are the most common failure at branches, so retry a
+// couple of times before surfacing an error to the user.
+async function withRetry(fn, { attempts = 2, onRetry } = {}) {
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (e instanceof NetworkError && i < attempts - 1) {
+        onRetry?.();
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        continue;
+      }
+      throw e;
+    }
+  }
+  return undefined;
+}
+
+function saveErrorMessage(e) {
+  if (e instanceof NetworkError) return "No internet connection. Please check your connection.";
+  return e instanceof ApiError ? e.detail || "Could not save" : "Could not save";
+}
+
 async function saveTotalSale() {
   totalSale.error = "";
   if (Number.isNaN(Number(totalSale.amount))) return;
   const amount = totalSale.amount === "" ? 0 : Number(totalSale.amount);
   totalSale.saving = true;
   try {
-    if (totalSale.id) {
-      await updateTotalSale(totalSale.id, amount);
-    } else {
-      const created = await createTotalSale({ date: today.value, amount });
-      totalSale.id = created.id;
-    }
+    await withRetry(async () => {
+      if (totalSale.id) {
+        await updateTotalSale(totalSale.id, amount);
+      } else {
+        const created = await createTotalSale({ date: today.value, amount });
+        totalSale.id = created.id;
+      }
+    }, { onRetry: () => { totalSale.retrying = true; } });
     totalSale.editing = false;
     totalSale.saved = true;
     setTimeout(() => {
       totalSale.saved = false;
     }, 1500);
   } catch (e) {
-    totalSale.error = e instanceof ApiError ? e.detail || "Could not save" : "Could not save";
+    totalSale.error = saveErrorMessage(e);
   } finally {
     totalSale.saving = false;
+    totalSale.retrying = false;
   }
 }
 
@@ -218,26 +247,28 @@ async function saveDelivery(itemId) {
   if (Number.isNaN(Number(r.delivery))) return;
   r.deliverySaving = true;
   try {
-    if (r.delivery === "") {
-      if (r.deliveryId) {
-        await deleteStockDelivery(r.deliveryId);
-        r.deliveryId = null;
+    await withRetry(async () => {
+      if (r.delivery === "") {
+        if (r.deliveryId) {
+          await deleteStockDelivery(r.deliveryId);
+          r.deliveryId = null;
+        }
+        return;
       }
-      flashSaved(r, "delivery");
-      return;
-    }
-    const quantity = Number(r.delivery);
-    if (r.deliveryId) {
-      await updateStockDelivery(r.deliveryId, { quantity_delivered: quantity });
-    } else {
-      const created = await createStockDelivery({ itemId, quantityDelivered: quantity });
-      r.deliveryId = created.id;
-    }
+      const quantity = Number(r.delivery);
+      if (r.deliveryId) {
+        await updateStockDelivery(r.deliveryId, { quantity_delivered: quantity });
+      } else {
+        const created = await createStockDelivery({ itemId, quantityDelivered: quantity });
+        r.deliveryId = created.id;
+      }
+    }, { onRetry: () => { r.deliveryRetrying = true; } });
     flashSaved(r, "delivery");
   } catch (e) {
-    r.deliveryError = e instanceof ApiError ? e.detail || "Could not save" : "Could not save";
+    r.deliveryError = saveErrorMessage(e);
   } finally {
     r.deliverySaving = false;
+    r.deliveryRetrying = false;
   }
 }
 
@@ -247,26 +278,28 @@ async function saveClosing(itemId) {
   if (Number.isNaN(Number(r.closing))) return;
   r.closingSaving = true;
   try {
-    if (r.closing === "") {
-      if (r.closingId) {
-        await deleteStockCount(r.closingId);
-        r.closingId = null;
+    await withRetry(async () => {
+      if (r.closing === "") {
+        if (r.closingId) {
+          await deleteStockCount(r.closingId);
+          r.closingId = null;
+        }
+        return;
       }
-      flashSaved(r, "closing");
-      return;
-    }
-    const quantity = Number(r.closing);
-    if (r.closingId) {
-      await updateStockCount(r.closingId, { quantity_remaining: quantity });
-    } else {
-      const created = await createStockCount({ itemId, quantityRemaining: quantity });
-      r.closingId = created.id;
-    }
+      const quantity = Number(r.closing);
+      if (r.closingId) {
+        await updateStockCount(r.closingId, { quantity_remaining: quantity });
+      } else {
+        const created = await createStockCount({ itemId, quantityRemaining: quantity });
+        r.closingId = created.id;
+      }
+    }, { onRetry: () => { r.closingRetrying = true; } });
     flashSaved(r, "closing");
   } catch (e) {
-    r.closingError = e instanceof ApiError ? e.detail || "Could not save" : "Could not save";
+    r.closingError = saveErrorMessage(e);
   } finally {
     r.closingSaving = false;
+    r.closingRetrying = false;
   }
 }
 
@@ -289,17 +322,20 @@ async function saveNeed(itemId) {
   r.needError = "";
   r.needSaving = true;
   try {
-    if (r.needChecked && !r.needId) {
-      const created = await createStockNeed({ itemId, date: today.value });
-      r.needId = created.id;
-    } else if (!r.needChecked && r.needId) {
-      await deleteStockNeed(r.needId);
-      r.needId = null;
-    }
+    await withRetry(async () => {
+      if (r.needChecked && !r.needId) {
+        const created = await createStockNeed({ itemId, date: today.value });
+        r.needId = created.id;
+      } else if (!r.needChecked && r.needId) {
+        await deleteStockNeed(r.needId);
+        r.needId = null;
+      }
+    }, { onRetry: () => { r.needRetrying = true; } });
   } catch (e) {
-    r.needError = e instanceof ApiError ? e.detail || "Could not save" : "Could not save";
+    r.needError = saveErrorMessage(e);
   } finally {
     r.needSaving = false;
+    r.needRetrying = false;
   }
 }
 
@@ -380,6 +416,7 @@ onUnmounted(() => {
           </button>
         </div>
       </div>
+      <p v-if="totalSale.retrying" class="row-retrying"><Icon name="refresh" :size="12" class="spin" /> Retrying to save…</p>
       <p v-if="totalSale.error" class="row-error">{{ totalSale.error }}</p>
     </div>
 
@@ -466,6 +503,9 @@ onUnmounted(() => {
           Need Deliver
         </label>
 
+        <p v-if="rowFor(item.id).deliveryRetrying" class="row-retrying"><Icon name="refresh" :size="12" class="spin" /> Retrying to save…</p>
+        <p v-if="rowFor(item.id).closingRetrying" class="row-retrying"><Icon name="refresh" :size="12" class="spin" /> Retrying to save…</p>
+        <p v-if="rowFor(item.id).needRetrying" class="row-retrying"><Icon name="refresh" :size="12" class="spin" /> Retrying to save…</p>
         <p v-if="rowFor(item.id).deliveryError" class="row-error">{{ rowFor(item.id).deliveryError }}</p>
         <p v-if="rowFor(item.id).closingError" class="row-error">{{ rowFor(item.id).closingError }}</p>
         <p v-if="rowFor(item.id).needError" class="row-error">{{ rowFor(item.id).needError }}</p>
@@ -770,6 +810,28 @@ onUnmounted(() => {
   color: var(--color-danger);
   font-size: 0.8rem;
   margin: 0.4rem 0 0;
+}
+
+.row-retrying {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  margin: 0.4rem 0 0;
+}
+
+.row-retrying .spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 520px) {

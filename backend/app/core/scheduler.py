@@ -10,7 +10,9 @@ def start_scheduler() -> AsyncIOScheduler:
     if settings.backup_enabled:
         scheduler.add_job(
             run_backup,
-            trigger=CronTrigger(hour=settings.backup_hour_local, minute=0),
+            trigger=CronTrigger(
+                hour=settings.backup_hour_local, minute=0, timezone=settings.app_timezone
+            ),
             kwargs={"triggered_by": "scheduled"},
             id="daily_backup",
         )

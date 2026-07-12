@@ -21,6 +21,12 @@ export class ApiError extends Error {
   }
 }
 
+export class NetworkError extends Error {
+  constructor() {
+    super("Network error");
+  }
+}
+
 export async function apiFetch(path, { method = "GET", body, auth = true } = {}) {
   const authStore = useAuthStore();
   const headers = { "Content-Type": "application/json" };
@@ -28,11 +34,16 @@ export async function apiFetch(path, { method = "GET", body, auth = true } = {})
     headers.Authorization = `Bearer ${authStore.token}`;
   }
 
-  const response = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  let response;
+  try {
+    response = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new NetworkError();
+  }
 
   if (response.status === 401 && auth) {
     authStore.logout();
